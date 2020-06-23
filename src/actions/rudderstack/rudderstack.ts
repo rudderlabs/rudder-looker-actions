@@ -287,7 +287,14 @@ export class RudderAction extends Hub.Action {
         traits.email = row[field.name].value
       }
     }
-    const userId: string | null = rudderFields.idField ? row[rudderFields.idField.name].value : null
+
+    // If userId tagged column present, take that value as userId
+    let userId: string | null
+    if (rudderFields.userIdField) {
+      userId = row[rudderFields.userIdField.name].value
+    } else {
+      userId = null
+    }
     let anonymousId: string | null
     if (rudderFields.anonymousIdField) {
       anonymousId = row[rudderFields.anonymousIdField.name].value
