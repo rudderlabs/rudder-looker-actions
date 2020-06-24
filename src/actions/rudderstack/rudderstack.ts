@@ -40,15 +40,15 @@ export class RudderAction extends Hub.Action {
   description = "Add traits via identify to your Rudder users."
   params = [
     {
-      description: "A write key for Rudder.",
+      description: "Looker source write key for Rudder.",
       label: "Rudder Write Key",
       name: "rudder_write_key",
       required: true,
       sensitive: true,
     },
     {
-      description: "Rudder Server URL",
-      label: "Rudder Server URL",
+      description: "Give your Rudder server URL",
+      label: "Rudder Data Plane URL",
       name: "rudder_server_url",
       required: true,
       sensitive: false,
