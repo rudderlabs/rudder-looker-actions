@@ -166,7 +166,7 @@ export class RudderAction extends Hub.Action {
             if(totalRows == totalRequestsCompleted) {
               resolve()
             }
-            if(checkCount == 20) {
+            if(checkCount > 20) {
               reject(new Error("sending to server took too long..aborting after 20 secs"))
             }
             checkCount = checkCount +1
