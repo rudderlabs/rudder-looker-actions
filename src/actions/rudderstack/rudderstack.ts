@@ -160,6 +160,9 @@ export class RudderAction extends Hub.Action {
       await new Promise<void>(async (resolve, reject) => {
         setInterval(() => {
           try{
+            winston.info(`[Rudder] totalrows in final promise : ${totalRows}`);
+            winston.info(`[Rudder] totalRequestsCompleted in final promise : ${totalRequestsCompleted}`);
+            
             if(totalRows == totalRequestsCompleted) {
               resolve()
             }
@@ -168,6 +171,7 @@ export class RudderAction extends Hub.Action {
             }
             checkCount = checkCount +1
           } catch(e) {
+            winston.error(`[Rudder] error in Rudder action execution in final promise : ${e}`)
             reject(e)
           }
           
