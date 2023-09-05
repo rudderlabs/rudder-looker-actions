@@ -1,11 +1,14 @@
 import * as chai from "chai"
 import * as sinon from "sinon"
 
+
 import * as Hub from "../../hub"
 import * as apiKey from "../../server/api_key"
 import Server from "../../server/server"
 import { RudderAction } from "./rudderstack"
+const chaiHttp = require('chai-http');
 
+chai.use(chaiHttp);
 const action = new RudderAction()
 action.executeInOwnProcess = false
 
