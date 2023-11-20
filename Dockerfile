@@ -1,4 +1,4 @@
-FROM node:18.18
+FROM node:21.1-bookworm-slim
 
 RUN mkdir -p /code
 WORKDIR /code
