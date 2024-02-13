@@ -19,6 +19,11 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Docker Image Tags
+        run: |
+          img_version=$(jq -r .version package.json)
+          echo "img_version=$img_version" >> $GITHUB_OUTPUT
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v4
@@ -26,7 +31,7 @@ jobs:
           images: |
             rudderstack/action-hub
           tags: |
-            type=raw,value={{ latest }}, enable=${{ github.event_name == 'push' && github.ref_name == 'master' }}
+            type=raw,value={{ $img_version }}, enable=${{ github.event_name == 'push' && github.ref_name == 'master' }}
             type=raw,value=${{ github.head_ref }}, enable=${{ github.event_name == 'pull_request' }}
       - name: Build and push rudder-looker-actions
         uses: docker/build-push-action@v3
@@ -40,10 +45,6 @@ jobs:
             VERSION=${{ github.ref_name }}
 
       # Raise PR to devops
-      - name: Print Docker Image Tags
-        run: |
-          img_version=$(jq -r .version package.json)
-          echo "img_version=$img_version" >> $GITHUB_OUTPUT
 
       - name: Initialize Mandatory Git Config
         run: |
