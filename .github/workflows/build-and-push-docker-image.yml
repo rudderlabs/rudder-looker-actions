@@ -75,18 +75,36 @@ jobs:
         run: |
           gh repo clone rudderlabs/rudder-devops
 
-      - name: Raise PR to update image in production
+      - name: Get version from package.json
+        if: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+        id: version
+        run: |
+          img_version=$(jq -r .version package.json)
+          echo "img_version=$img_version" >> $GITHUB_OUTPUT
+
+      - name: Prepare devops repo changes
+        if: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+        run: |
+          cd rudder-devops/helm-charts/helm/looker-action-hub/environment/prod
+          yq eval -i ".actionhubImage.image=\"rudderstack/action-hub:${{ steps.version.outputs.img_version }}\"" base.yaml
+
+      - name: Create verified commit via GitHub API
+        if: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+        uses: ryancyq/github-signed-commit@e9f3b28c80da7be66d24b8f501a5abe82a6b855f # v1.2.0
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        with:
+          owner: rudderlabs
+          repository: rudder-devops
+          branch-name: rudder-looker-actions-${{ steps.version.outputs.img_version }}
+          commit-message: 'chore: upgrade looker-action to ${{ steps.version.outputs.img_version }}'
+          files: helm-charts/helm/looker-action-hub/environment/prod/base.yaml
+          working-directory: rudder-devops
+
+      - name: Create PR in devops repo
         if: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           cd rudder-devops
-          git checkout -b rudder-looker-actions-$img_version
-
-          cd helm-charts/helm/looker-action-hub/environment/prod
-          yq eval -i ".actionhubImage.image=\"rudderstack/action-hub:$img_version\"" base.yaml
-          git add base.yaml
-          git commit -m "chore: upgrade looker-action to $img_version"
-          git push -u origin rudder-looker-actions-$img_version
-
           gh pr create --fill
