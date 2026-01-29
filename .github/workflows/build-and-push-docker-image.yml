@@ -63,11 +63,6 @@ jobs:
 
       # Raise PR to devops
 
-      - name: Initialize Mandatory Git Config
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "noreply@github.com"
-
       - name: Clone Devops Repo
         if: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
         env:
@@ -81,6 +76,18 @@ jobs:
         run: |
           img_version=$(jq -r .version package.json)
           echo "img_version=$img_version" >> $GITHUB_OUTPUT
+
+      - name: Create release branch via GitHub API
+        if: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          cd rudder-devops
+          BASE_SHA=$(git rev-parse HEAD)
+          gh api repos/rudderlabs/rudder-devops/git/refs \
+            --method POST \
+            -f ref="refs/heads/rudder-looker-actions-${{ steps.version.outputs.img_version }}" \
+            -f sha="$BASE_SHA"
 
       - name: Prepare devops repo changes
         if: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
