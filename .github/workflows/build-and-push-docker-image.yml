@@ -101,8 +101,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         with:
-          owner: rudderlabs
-          repository: rudder-devops
+          repository: rudderlabs/rudder-devops
           branch-name: rudder-looker-actions-${{ steps.version.outputs.img_version }}
           commit-message: 'chore: upgrade looker-action to ${{ steps.version.outputs.img_version }}'
           files: helm-charts/helm/looker-action-hub/environment/prod/base.yaml
