@@ -58,5 +58,4 @@ jobs:
       #   if: always()
       #   uses: SonarSource/sonarcloud-github-action@v2.0.0
       #   env:
-      #     GITHUB_TOKEN: ${{ secrets.PAT }}
       #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
