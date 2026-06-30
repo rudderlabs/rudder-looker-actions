@@ -131,14 +131,19 @@
     "**/google-auth-library": "^7.14.0",
     "**/pac-resolver": "^5.0.0",
     "**/mem": "^4.0.0",
-    "**/formidable": "^3.2.4"
+    "**/formidable": "^3.2.4",
+    "@types/glob": "^7.2.0",
+    "@types/minimatch": "^3.0.5"
   },
   "devDependencies": {
     "@types/chai": "^4.2.12",
     "@types/chai-as-promised": "^7.1.3",
     "@types/chai-http": "^3.0.5",
     "@types/concat-stream": "^1.6.0",
+    "@types/glob": "^7.2.0",
+    "@types/minimatch": "^3.0.0",
     "@types/mocha": "^8.0.2",
+    "@types/rimraf": "^2.0.0",
     "@types/sinon": "^5.0.7",
     "@types/sinon-chai": "^2.7.37",
     "@types/sinon-express-mock": "^1.3.9",
