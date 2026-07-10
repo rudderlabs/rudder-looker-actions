@@ -14,7 +14,8 @@ jobs:
     outputs:
       # Job outputs are always strings, so downstream `if:` must compare to 'true'.
       release_created: ${{ steps.release.outputs.release_created }}
-      # e.g. "v1.5.0" -> the image tag is the bare version, without the leading v.
+      # Bare version, e.g. "1.5.0". Tags carry no "v" prefix
+      # (include-v-in-tag: false), so this matches the git tag exactly.
       image_tag: ${{ steps.release.outputs.version }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -42,7 +43,7 @@ jobs:
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     permissions:
       contents: read # to checkout repository code in the reusable workflow
-    uses: ./.github/workflows/build-push-docker-image.yml
+    uses: ./.github/workflows/publish-release.yml
     with:
       image_repo: rudderstack/action-hub
       image_tag: ${{ needs.release-please.outputs.image_tag }}

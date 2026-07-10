@@ -1,4 +1,4 @@
-name: Build and Push Docker Image
+name: Publish Release
 
 on:
   workflow_call:
@@ -56,14 +56,23 @@ jobs:
             VERSION=${{ inputs.image_tag }}
 
   create-pull-request-devops:
-    name: Create PR for looker-action-hub (devops)
+    name: Create ${{ matrix.environment }} PR for looker-action-hub (devops)
     runs-on: ubuntu-latest
     needs: [build-and-push-image]
     permissions:
       contents: read # cross-repo writes use the app token below
+    strategy:
+      # One PR per environment so staging can be merged and soaked before prod.
+      # Serialized: both legs branch off rudder-devops master and would
+      # otherwise race when pushing their branches.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        environment: [staging, prod]
     env:
       TAG_NAME: ${{ inputs.image_tag }}
       IMAGE_REPO: ${{ inputs.image_repo }}
+      ENVIRONMENT: ${{ matrix.environment }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -91,11 +100,10 @@ jobs:
           # token is a short-lived App token scoped to rudder-devops only.
           persist-credentials: true
 
-      - name: Update image tags in devops repo
+      - name: Update image tag in devops repo
         run: |
-          cd helm-charts/helm/looker-action-hub/environment
-          yq eval -i ".actionhubImage.image=\"$IMAGE_REPO:$TAG_NAME\"" staging/base.yaml
-          yq eval -i ".actionhubImage.image=\"$IMAGE_REPO:$TAG_NAME\"" prod/base.yaml
+          cd "helm-charts/helm/looker-action-hub/environment/$ENVIRONMENT"
+          yq eval -i ".actionhubImage.image=\"$IMAGE_REPO:$TAG_NAME\"" base.yaml
 
       # The branch is not created here: github-signed-commit runs
       # `git checkout -b <branch>` + `git push --set-upstream origin HEAD`
@@ -103,18 +111,18 @@ jobs:
       # work and made re-runs fail with HTTP 422 (reference already exists).
 
       - name: Create verified commit via GitHub API
-        # Pinned to main: the `repository` input (needed to target rudder-devops)
-        # does not exist in the v1.2.0 tag, where it is silently ignored.
-        uses: ryancyq/github-signed-commit@d046f1493ec46c6df96e7c5a76ccbf2b1786bdf7 # main, for repository support
+        # v1.4.0 is the first tagged release with the `repository` input, which
+        # is required to target rudder-devops (v1.2.0 silently ignores it and
+        # would commit to this repo instead).
+        uses: ryancyq/github-signed-commit@6afa32d8aa9819faddc248e6258e9c11ec05ecc8 # v1.4.0
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         with:
           repository: rudderlabs/rudder-devops
-          branch-name: rudder-looker-actions-${{ env.TAG_NAME }}
-          commit-message: 'chore: upgrade looker-action to ${{ env.TAG_NAME }}'
+          branch-name: rudder-looker-actions-${{ env.ENVIRONMENT }}-${{ env.TAG_NAME }}
+          commit-message: 'chore: upgrade looker-action ${{ env.ENVIRONMENT }} to ${{ env.TAG_NAME }}'
           files: |
-            helm-charts/helm/looker-action-hub/environment/staging/base.yaml
-            helm-charts/helm/looker-action-hub/environment/prod/base.yaml
+            helm-charts/helm/looker-action-hub/environment/${{ matrix.environment }}/base.yaml
 
       - name: Create PR in devops repo
         env:
@@ -123,6 +131,6 @@ jobs:
           gh pr create \
             --repo rudderlabs/rudder-devops \
             --base master \
-            --head "rudder-looker-actions-$TAG_NAME" \
-            --title "chore: upgrade looker-action to $TAG_NAME" \
-            --body "Automated PR to update staging and production looker-action-hub images to $TAG_NAME"
+            --head "rudder-looker-actions-$ENVIRONMENT-$TAG_NAME" \
+            --title "chore: upgrade looker-action $ENVIRONMENT to $TAG_NAME" \
+            --body "Automated PR to update the $ENVIRONMENT looker-action-hub image to $TAG_NAME"
