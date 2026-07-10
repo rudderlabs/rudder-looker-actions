@@ -1,0 +1,53 @@
+name: release-please
+on:
+  push:
+    branches:
+      - "master"
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      # Job outputs are always strings, so downstream `if:` must compare to 'true'.
+      release_created: ${{ steps.release.outputs.release_created }}
+      # Bare version, e.g. "1.5.0". Tags carry no "v" prefix
+      # (include-v-in-tag: false), so this matches the git tag exactly.
+      image_tag: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Generate GitHub App Token
+        id: generate-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PRIVATE_KEY }}
+          permission-contents: write # to create release commits and tags
+          permission-pull-requests: write # to create the release PR
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+
+  build-and-push:
+    name: Build and Push Image
+    needs: [release-please]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: read # to checkout repository code in the reusable workflow
+    uses: ./.github/workflows/publish-release.yml
+    with:
+      image_repo: rudderstack/action-hub
+      image_tag: ${{ needs.release-please.outputs.image_tag }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      RELEASE_PRIVATE_KEY: ${{ secrets.RELEASE_PRIVATE_KEY }}
