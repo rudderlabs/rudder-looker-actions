@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      # Job outputs are always strings, so downstream `if:` must compare to 'true'.
+      release_created: ${{ steps.release.outputs.release_created }}
+      # e.g. "v1.5.0" -> the image tag is the bare version, without the leading v.
+      image_tag: ${{ steps.release.outputs.version }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -30,3 +35,17 @@ jobs:
         id: release
         with:
           token: ${{ steps.generate-token.outputs.token }}
+
+  build-and-push:
+    name: Build and Push Image
+    needs: [release-please]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: read # to checkout repository code in the reusable workflow
+    uses: ./.github/workflows/build-push-docker-image.yml
+    with:
+      image_repo: rudderstack/action-hub
+      image_tag: ${{ needs.release-please.outputs.image_tag }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
