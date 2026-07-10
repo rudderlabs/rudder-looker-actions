@@ -14,6 +14,10 @@ on:
         required: true
       DOCKERHUB_TOKEN:
         required: true
+      # Secrets are not inherited by reusable workflows unless declared here
+      # and passed by the caller (or via `secrets: inherit`).
+      RELEASE_PRIVATE_KEY:
+        required: true
 
 permissions:
   contents: read
@@ -80,6 +84,7 @@ jobs:
         uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
           repository: rudderlabs/rudder-devops
+          ref: master # base the release branch on an explicit ref, not "whatever HEAD is"
           token: ${{ steps.generate-token.outputs.token }}
           # Must persist: github-signed-commit runs `git push` for the new
           # branch, which needs the credential in the local git config. The
@@ -92,15 +97,10 @@ jobs:
           yq eval -i ".actionhubImage.image=\"$IMAGE_REPO:$TAG_NAME\"" staging/base.yaml
           yq eval -i ".actionhubImage.image=\"$IMAGE_REPO:$TAG_NAME\"" prod/base.yaml
 
-      - name: Create release branch on remote
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-        run: |
-          BASE_SHA=$(git rev-parse HEAD)
-          gh api repos/rudderlabs/rudder-devops/git/refs \
-            --method POST \
-            -f ref="refs/heads/rudder-looker-actions-$TAG_NAME" \
-            -f sha="$BASE_SHA"
+      # The branch is not created here: github-signed-commit runs
+      # `git checkout -b <branch>` + `git push --set-upstream origin HEAD`
+      # itself. Creating it up front via `gh api .../git/refs` duplicated that
+      # work and made re-runs fail with HTTP 422 (reference already exists).
 
       - name: Create verified commit via GitHub API
         # Pinned to main: the `repository` input (needed to target rudder-devops)
