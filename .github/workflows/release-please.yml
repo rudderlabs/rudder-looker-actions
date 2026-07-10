@@ -42,6 +42,7 @@ jobs:
     needs: [release-please]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     permissions:
+      id-token: write # to pass the OIDC token to the reusable workflow (AWS ECR)
       contents: read # to checkout repository code in the reusable workflow
     uses: ./.github/workflows/publish-release.yml
     with:

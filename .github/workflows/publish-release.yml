@@ -20,13 +20,15 @@ on:
         required: true
 
 permissions:
-  contents: read
+  id-token: write # allows the JWT to be requested from GitHub's OIDC provider
+  contents: read # required for actions/checkout
 
 jobs:
   build-and-push-image:
     name: Build and Push ${{ inputs.image_repo }}:${{ inputs.image_tag }}
     runs-on: ubuntu-latest
     permissions:
+      id-token: write # to request the OIDC JWT for AWS (configure-aws-credentials)
       contents: read # to checkout repository code (actions/checkout)
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -39,14 +41,41 @@ jobs:
         with:
           persist-credentials: false # nothing here talks to git after checkout
 
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          aws-region: ${{ vars.AWS_ECR_REGION }}
+          role-to-assume: ${{ vars.AWS_ECR_IAM_ROLE_ARN }}
+          role-session-name: ${{ github.event.repository.name }}-build-push
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+      - name: Build and Push Image to ECR
+        uses: rudderlabs/build-scan-push-action@865b4253caa57f8f20cd109e0efc1affe3a64939 # v2.2.0
+        with:
+          context: .
+          push: true
+          tags: ${{ format('{0}/{1}:{2}', steps.login-ecr.outputs.registry, inputs.image_repo, inputs.image_tag) }}
+          platforms: linux/amd64
+          build-args: |
+            VERSION=${{ inputs.image_tag }}
+
+      # TODO: Remove this once we have migrated to ECR. The rudder-devops helm
+      # chart still pins the Docker Hub image.
       - name: Logging in to Docker
         uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push rudder-looker-actions
-        uses: docker/build-push-action@1104d471370f9806843c095c1db02b5a90c5f8b6 # v3.3.1
+      # TODO: Remove this once we have migrated to ECR.
+      - name: Build and Push Image to DockerHub
+        uses: rudderlabs/build-scan-push-action@865b4253caa57f8f20cd109e0efc1affe3a64939 # v2.2.0
         with:
           context: .
           push: true
