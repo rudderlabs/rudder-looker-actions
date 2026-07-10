@@ -32,6 +32,8 @@ jobs:
 
       - name: Check out repository code
         uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        with:
+          persist-credentials: false # nothing here talks to git after checkout
 
       - name: Logging in to Docker
         uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
@@ -79,6 +81,10 @@ jobs:
         with:
           repository: rudderlabs/rudder-devops
           token: ${{ steps.generate-token.outputs.token }}
+          # Must persist: github-signed-commit runs `git push` for the new
+          # branch, which needs the credential in the local git config. The
+          # token is a short-lived App token scoped to rudder-devops only.
+          persist-credentials: true
 
       - name: Update image tags in devops repo
         run: |
@@ -97,7 +103,9 @@ jobs:
             -f sha="$BASE_SHA"
 
       - name: Create verified commit via GitHub API
-        uses: ryancyq/github-signed-commit@e9f3b28c80da7be66d24b8f501a5abe82a6b855f # v1.2.0
+        # Pinned to main: the `repository` input (needed to target rudder-devops)
+        # does not exist in the v1.2.0 tag, where it is silently ignored.
+        uses: ryancyq/github-signed-commit@d046f1493ec46c6df96e7c5a76ccbf2b1786bdf7 # main, for repository support
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         with:
