@@ -1,4 +1,4 @@
-name: build image pr
+name: build and push image pr
 on:
   pull_request:
 
@@ -7,7 +7,7 @@ permissions:
 
 jobs:
   build-image:
-    name: Build Docker Image (no push)
+    name: Build Docker Image
     runs-on: ubuntu-latest
     permissions:
       contents: read # to checkout repository code (actions/checkout)
@@ -19,19 +19,47 @@ jobs:
 
       - name: Check out repository code
         uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        with:
+          persist-credentials: false # nothing here talks to git after checkout
 
-      # Build-only smoke test: verifies the Dockerfile still builds on every PR.
-      # Publishing is owned by release-please (see release-please.yml), which
-      # calls build-push-docker-image.yml once a release is actually cut.
-      # The tag is only a local label for the build cache; nothing is pushed.
-      # It must still be a valid Docker tag, so it cannot be derived from the
-      # branch name -- branches like "chore/foo" contain slashes.
-      - name: Build rudder-looker-actions
+      # A branch name is not a valid Docker tag: "chore/foo" contains a slash.
+      # docker/metadata-action used to do this for us -- it replaces invalid
+      # char sequences with "-", strips a leading dot/dash and caps at 128
+      # chars. Reproduced here so existing tags (e.g. chore-bump-axios-version)
+      # keep the same names. head_ref goes through env, never interpolated
+      # straight into the shell.
+      - name: Compute image tag
+        id: tag
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          img_tag=$(printf '%s' "$HEAD_REF" \
+            | sed -E 's/[^a-zA-Z0-9_.-]+/-/g; s/^[.-]+//' \
+            | cut -c1-128)
+          # A branch of only invalid chars would sanitize to "", which would
+          # push an untagged ":" reference.
+          if [ -z "$img_tag" ]; then
+            img_tag="pr-$PR_NUMBER"
+          fi
+          echo "img_tag=$img_tag" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $img_tag"
+
+      # Fork PRs cannot read secrets under the `pull_request` trigger, so the
+      # login would fail. They still build below as a smoke test.
+      - name: Logging in to Docker
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push rudder-looker-actions
         uses: docker/build-push-action@1104d471370f9806843c095c1db02b5a90c5f8b6 # v3.3.1
         with:
           context: .
-          push: false
-          tags: rudderstack/action-hub:pr-${{ github.event.pull_request.number }}
+          push: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          tags: rudderstack/action-hub:${{ steps.tag.outputs.img_tag }}
           platforms: linux/amd64
           build-args: |
             VERSION=${{ github.event.pull_request.head.sha }}
