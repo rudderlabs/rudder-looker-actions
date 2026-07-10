@@ -59,7 +59,7 @@ jobs:
         with:
           aws-region: ${{ vars.AWS_ECR_REGION }}
           role-to-assume: ${{ vars.AWS_ECR_IAM_ROLE_ARN }}
-          role-session-name: ${{ github.event.repository.name }}-pr-build
+          role-session-name: ${{ github.event.repository.name }}-manifest
 
       - name: Login to ECR
         if: ${{ env.CAN_PUBLISH == 'true' }}
