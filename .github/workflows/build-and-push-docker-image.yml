@@ -59,20 +59,23 @@ jobs:
         with:
           aws-region: ${{ vars.AWS_ECR_REGION }}
           role-to-assume: ${{ vars.AWS_ECR_IAM_ROLE_ARN }}
-          role-session-name: ${{ github.event.repository.name }}-manifest
+          role-session-name: ${{ github.event.repository.name }}-build-push
 
       - name: Login to ECR
         if: ${{ env.CAN_PUBLISH == 'true' }}
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
 
+      # Tagged `pr-<number>`, not the branch name: the ECR lifecycle policy
+      # expires images by tag prefix, and only `pr-` is collected (after 7
+      # days). A branch-named tag would match no rule and live forever.
       - name: Build and Push Image to ECR
         if: ${{ env.CAN_PUBLISH == 'true' }}
         uses: rudderlabs/build-scan-push-action@865b4253caa57f8f20cd109e0efc1affe3a64939 # v2.2.0
         with:
           context: .
           push: true
-          tags: ${{ format('{0}/rudderstack/action-hub:{1}', steps.login-ecr.outputs.registry, steps.tag.outputs.img_tag) }}
+          tags: ${{ format('{0}/rudderstack/action-hub:pr-{1}', steps.login-ecr.outputs.registry, github.event.pull_request.number) }}
           platforms: linux/amd64
           build-args: |
             VERSION=${{ github.event.pull_request.head.sha }}
