@@ -1,0 +1,66 @@
+name: Build Artifacts for PRs
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # A branch name is not a valid Docker tag: "chore/foo" contains a slash.
+  # docker/metadata-action used to do this for us -- it replaces invalid char
+  # sequences with "-", strips a leading dot/dash and caps at 128 chars.
+  # Reproduced here so existing tags (e.g. chore-bump-axios-version) keep the
+  # same names. head_ref goes through env, never interpolated straight into the
+  # shell.
+  get-image-tag:
+    name: Compute image tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # minimum required permission for job execution
+    outputs:
+      img_tag: ${{ steps.tag.outputs.img_tag }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Compute image tag
+        id: tag
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          img_tag=$(printf '%s' "$HEAD_REF" \
+            | sed -E 's/[^a-zA-Z0-9_.-]+/-/g; s/^[.-]+//' \
+            | cut -c1-128)
+          # A branch of only invalid chars would sanitize to "", which would
+          # push an untagged ":" reference.
+          if [ -z "$img_tag" ]; then
+            img_tag="pr-$PR_NUMBER"
+          fi
+          echo "img_tag=$img_tag" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $img_tag"
+
+  # ECR is tagged `pr-<number>` while Docker Hub keeps the branch name: the ECR
+  # lifecycle policy expires images by tag prefix and only collects `pr-` (after
+  # 7 days), so a branch-named tag there would match no rule and live forever.
+  # Docker Hub's existing tags are branch-named, so those stay as they are.
+  build-and-push:
+    name: Build and Push Image
+    needs: [get-image-tag]
+    permissions:
+      id-token: write # to request the OIDC JWT for AWS (configure-aws-credentials)
+      contents: read # to checkout repository code (actions/checkout)
+    uses: ./.github/workflows/build-push-docker-image.yml
+    with:
+      ecr_tag: rudderstack/action-hub:pr-${{ github.event.pull_request.number }}
+      dockerhub_tag: rudderstack/action-hub:${{ needs.get-image-tag.outputs.img_tag }}
+      version: ${{ github.event.pull_request.head.sha }}
+      ref: ${{ github.event.pull_request.head.sha }}
+      # Fork PRs get neither secrets nor an OIDC token under `pull_request`, so
+      # they build only, as a smoke test.
+      can_publish: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
