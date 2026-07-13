@@ -1,0 +1,5 @@
+image-metadata:history*:created-by
+node_modules/
+/opt/yarn-v1.22.22/
+/root/.npm/_cacache/
+/code/.yarn/releases/
