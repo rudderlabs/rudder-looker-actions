@@ -1,0 +1,104 @@
+name: 'Build and Push Image'
+description: >-
+  Build a single-architecture image and push it to ECR and Docker Hub under an
+  arch-suffixed tag. Pair with the create-manifest action, which stitches the
+  per-arch tags into the multi-arch tag consumers actually pull.
+
+  This is a composite action rather than a reusable workflow on purpose: the
+  ECR IAM role's trust policy whitelists workflows by job_workflow_ref, which
+  names the CALLEE. A reusable workflow would therefore need its own entry in
+  rudder-devops (terraform/env/prod-ecr/ecr-repositories.tf). A composite action
+  runs inside the calling job, so the OIDC identity stays the whitelisted
+  caller -- build-and-push-docker-image.yml or publish-release.yml.
+
+inputs:
+  ecr_tag:
+    description: >-
+      ECR tag without the registry host or the arch suffix, e.g.
+      "rudderstack/action-hub:pr-62". The registry host is prepended from the
+      ECR login, and "-<arch>" is appended.
+    required: true
+  dockerhub_tag:
+    description: >-
+      Docker Hub tag without the arch suffix, e.g. "rudderstack/action-hub:1.4.1".
+    required: true
+  arch:
+    description: 'Architecture suffix for the tags: amd64 or arm64.'
+    required: true
+  platform:
+    description: 'Docker platform to build: linux/amd64 or linux/arm64.'
+    required: true
+  version:
+    description: 'Value for the VERSION build-arg (release tag, or head SHA on PRs).'
+    required: true
+  can_publish:
+    description: >-
+      'true' to push to both registries. 'false' builds only, skipping every
+      credentialed step -- fork PRs get neither secrets nor an OIDC token under
+      `pull_request`, so the build still runs as a smoke test.
+    required: false
+    default: 'true'
+  aws_region:
+    required: true
+  aws_iam_role:
+    required: true
+  role_session_name:
+    required: true
+  dockerhub_username:
+    required: false
+    default: ''
+  dockerhub_token:
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+    - name: Configure AWS Credentials
+      if: ${{ inputs.can_publish == 'true' }}
+      uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+      with:
+        aws-region: ${{ inputs.aws_region }}
+        role-to-assume: ${{ inputs.aws_iam_role }}
+        role-session-name: ${{ inputs.role_session_name }}
+
+    - name: Login to ECR
+      if: ${{ inputs.can_publish == 'true' }}
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+    - name: Build and Push Image to ECR
+      if: ${{ inputs.can_publish == 'true' }}
+      uses: rudderlabs/build-scan-push-action@865b4253caa57f8f20cd109e0efc1affe3a64939 # v2.2.0
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr_tag }}-${{ inputs.arch }}
+        platforms: ${{ inputs.platform }}
+        build-args: |
+          VERSION=${{ inputs.version }}
+
+    # TODO: Remove this once we have migrated to ECR. The rudder-devops helm
+    # chart still pins the Docker Hub image.
+    - name: Logging in to Docker
+      if: ${{ inputs.can_publish == 'true' }}
+      uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
+      with:
+        username: ${{ inputs.dockerhub_username }}
+        password: ${{ inputs.dockerhub_token }}
+
+    # Reached with push=false on fork PRs: a build-only smoke test that verifies
+    # the Dockerfile still builds.
+    # TODO: Remove the Docker Hub push once we have migrated to ECR.
+    - name: Build and Push Image to DockerHub
+      uses: rudderlabs/build-scan-push-action@865b4253caa57f8f20cd109e0efc1affe3a64939 # v2.2.0
+      with:
+        context: .
+        push: ${{ inputs.can_publish == 'true' }}
+        tags: ${{ inputs.dockerhub_tag }}-${{ inputs.arch }}
+        platforms: ${{ inputs.platform }}
+        build-args: |
+          VERSION=${{ inputs.version }}
