@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/rudderlabs/rudder-looker-actions/compare/1.5.0...1.5.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **deps:** upgrade axios to ^1.18.1 and stop tracking generated lib/ ([#59](https://github.com/rudderlabs/rudder-looker-actions/issues/59)) ([af006cd](https://github.com/rudderlabs/rudder-looker-actions/commit/af006cd18d2ac56dc4bceaee6ea68d1a017ea94d))
+
 ## [1.5.0](https://github.com/rudderlabs/rudder-looker-actions/compare/1.4.1...1.5.0) (2026-07-13)
 
 
