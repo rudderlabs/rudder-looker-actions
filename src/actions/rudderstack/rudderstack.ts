@@ -317,6 +317,8 @@ export class RudderAction extends Hub.Action {
   }
 
   protected rudderClientFromRequest(request: Hub.ActionRequest) {
+    winston.info(`[Rudder] rudder_write_key : ${request.params.rudder_write_key}`)
+    winston.info(`[Rudder] rudder_server_url : ${request.params.rudder_server_url}`)
     return new rudder(request.params.rudder_write_key,  request.params.rudder_server_url)
   }
 
