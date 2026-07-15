@@ -8,7 +8,11 @@ const action = new RudderGroupAction()
 action.executeInOwnProcess = false
 
 function expectRudderMatch(request: Hub.ActionRequest, match: any) {
-  const groupSpy = sinon.spy()
+  // The action invokes `group(payload, doneCb)` and reconciles completion
+  // counts before resolving, so the stub must call `doneCb` for each event.
+  const groupSpy = sinon.spy((_payload: any, done?: () => void) => {
+    if (done) { done() }
+  })
   const stubClient = sinon.stub(action as any, "rudderClientFromRequest")
     .callsFake(() => {
       return { group: groupSpy, flush: (cb: () => void) => cb()}
@@ -16,7 +20,9 @@ function expectRudderMatch(request: Hub.ActionRequest, match: any) {
   const stubAnon = sinon.stub(action as any, "generateAnonymousId").callsFake(() => "stubanon")
 
   const now = new Date()
-  const clock = sinon.useFakeTimers(now.getTime())
+  // shouldAdvanceTime lets the action's setInterval reconciliation loop fire
+  // while Date stays pinned to `now` for the timestamp assertions below.
+  const clock = sinon.useFakeTimers({now: now.getTime(), shouldAdvanceTime: true})
 
   const baseMatch = {
     traits: {},
@@ -31,7 +37,8 @@ function expectRudderMatch(request: Hub.ActionRequest, match: any) {
   const merged = {...baseMatch, ...match}
 
   return chai.expect(action.validateAndExecute(request)).to.be.fulfilled.then(() => {
-    chai.expect(groupSpy).to.have.been.calledWithExactly(merged)
+    // group is invoked as (payload, doneCb); assert only on the payload arg.
+    chai.expect(groupSpy).to.have.been.calledWith(merged)
     stubClient.restore()
     stubAnon.restore()
     clock.restore()
@@ -47,6 +54,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{ name: "coolfield", tags: ["rudder_group_id"]}]},
@@ -64,6 +72,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{ name: "coolfield", tags: ["rudder_group_id"]}, {name: "coolid", tags: ["user_id"]}]},
@@ -81,6 +90,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [
@@ -114,6 +124,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [
@@ -134,6 +145,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{ name: "coolfield", tags: ["rudder_group_id"]}, {name: "coolid", tags: ["user_id"]}]},

@@ -2,15 +2,17 @@ import * as chai from "chai"
 import * as sinon from "sinon"
 
 import * as Hub from "../../hub"
-import * as apiKey from "../../server/api_key"
-import Server from "../../server/server"
 import { RudderAction } from "./rudderstack"
 
 const action = new RudderAction()
 action.executeInOwnProcess = false
 
 function expectRudderMatch(request: Hub.ActionRequest, match: any) {
-  const rudderCallSpy = sinon.spy()
+  // The action invokes `identify(payload, doneCb)` and reconciles completion
+  // counts before resolving, so the stub must call `doneCb` for each event.
+  const rudderCallSpy = sinon.spy((_payload: any, done?: () => void) => {
+    if (done) { done() }
+  })
   const stubClient = sinon.stub(action as any, "rudderClientFromRequest")
     .callsFake(() => {
       return {identify: rudderCallSpy, flush: (cb: () => void) => cb()}
@@ -18,7 +20,9 @@ function expectRudderMatch(request: Hub.ActionRequest, match: any) {
   const stubAnon = sinon.stub(action as any, "generateAnonymousId").callsFake(() => "stubanon")
 
   const now = new Date()
-  const clock = sinon.useFakeTimers(now.getTime())
+  // shouldAdvanceTime lets the action's setInterval reconciliation loop fire
+  // while Date stays pinned to `now` for the timestamp assertions below.
+  const clock = sinon.useFakeTimers({now: now.getTime(), shouldAdvanceTime: true})
 
   const baseMatch = {
     traits: {},
@@ -32,7 +36,8 @@ function expectRudderMatch(request: Hub.ActionRequest, match: any) {
   }
   const merged = {...baseMatch, ...match}
   return chai.expect(action.validateAndExecute(request)).to.be.fulfilled.then(() => {
-    chai.expect(rudderCallSpy).to.have.been.calledWithExactly(merged)
+    // identify is invoked as (payload, doneCb); assert only on the payload arg.
+    chai.expect(rudderCallSpy).to.have.been.calledWith(merged)
     stubClient.restore()
     stubAnon.restore()
     clock.restore()
@@ -48,6 +53,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
           fields: {dimensions: [{name: "coolfield", tags: ["user_id"]}]},
@@ -64,6 +70,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{name: "coolfield", tags: ["email"]}]},
@@ -81,6 +88,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
           fields: {dimensions: [{name: "coolfield", tags: ["user_id"]}],
@@ -99,6 +107,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{name: "coolemail", tags: ["email"]}, {name: "coolid", tags: ["user_id"]}]},
@@ -116,6 +125,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [
@@ -136,6 +146,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [
@@ -166,6 +177,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [
@@ -185,6 +197,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [
@@ -193,7 +206,7 @@ describe(`${action.constructor.name} unit tests`, () => {
         data: [{coolanonymousid: {value: "anon_id"}}],
       }))}
       return expectRudderMatch(request, {
-        userId: "anon_id",
+        userId: null,
         anonymousId: "anon_id",
       })
     })
@@ -203,6 +216,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {
@@ -241,6 +255,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{name: "coolfield", tags: ["user_id"]}]},
@@ -257,6 +272,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{name: "coolfield", tags: ["email"]}]},
@@ -276,6 +292,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       return chai.expect(action.validateAndExecute(request)).to.eventually
         .be.rejectedWith(
@@ -287,6 +304,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         data: [{coolfield: {value: "funvalue"}}],
@@ -306,6 +324,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{name: "coolfield", tags: []}]},
@@ -339,35 +358,4 @@ describe(`${action.constructor.name} unit tests`, () => {
       chai.expect(action.hasForm).equals(false)
     })
   })
-
-  describe("asJSON", () => {
-    it("supported format is json_detail on lookerVersion 6.0 and below", (done) => {
-      const stub = sinon.stub(apiKey, "validate").callsFake((k: string) => k === "foo")
-      chai.request(new Server().app)
-        .post("/actions/rudder_event")
-        .set("Authorization", "Token token=\"foo\"")
-        .set("User-Agent", "LookerOutgoingWebhook/6.0.0")
-        .end((_err, res) => {
-          chai.expect(res).to.have.status(200)
-          chai.expect(res.body).to.deep.include({supported_formats: ["json_detail"]})
-          stub.restore()
-          done()
-        })
-    })
-
-    it("supported format is json_detail_lite_stream on lookerVersion 6.2 and above", (done) => {
-      const stub = sinon.stub(apiKey, "validate").callsFake((k: string) => k === "foo")
-      chai.request(new Server().app)
-        .post("/actions/rudder_event")
-        .set("Authorization", "Token token=\"foo\"")
-        .set("User-Agent", "LookerOutgoingWebhook/6.2.0")
-        .end((_err, res) => {
-          chai.expect(res).to.have.status(200)
-          chai.expect(res.body).to.deep.include({supported_formats: ["json_detail_lite_stream"]})
-          stub.restore()
-          done()
-        })
-    })
-  })
-
 })

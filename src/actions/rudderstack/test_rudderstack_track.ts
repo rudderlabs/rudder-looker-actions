@@ -12,7 +12,11 @@ describe(`${action.constructor.name} unit tests`, () => {
   describe("action", () => {
 
     it ("calls track", () => {
-      const rudderCallSpy = sinon.spy()
+      // The action invokes `track(payload, doneCb)` and reconciles completion
+      // counts before resolving, so the stub must call `doneCb` for each event.
+      const rudderCallSpy = sinon.spy((_payload: any, done?: () => void) => {
+        if (done) { done() }
+      })
       const stubClient = sinon.stub(action as any, "rudderClientFromRequest")
         .callsFake(() => {
           return {track: rudderCallSpy, flush: (cb: () => void) => cb()}
@@ -20,7 +24,9 @@ describe(`${action.constructor.name} unit tests`, () => {
       const stubAnon = sinon.stub(action as any, "generateAnonymousId").callsFake(() => "stubanon")
 
       const now = new Date()
-      const clock = sinon.useFakeTimers(now.getTime())
+      // shouldAdvanceTime lets the action's setInterval reconciliation loop fire
+      // while Date stays pinned to `now` for the timestamp assertion below.
+      const clock = sinon.useFakeTimers({now: now.getTime(), shouldAdvanceTime: true})
 
       const request = new Hub.ActionRequest()
       request.formParams = {
@@ -29,6 +35,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
+        rudder_server_url: "https://myrudder.com",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
           fields: {dimensions: [{name: "coolfield", tags: ["user_id"]}]},
@@ -36,7 +43,8 @@ describe(`${action.constructor.name} unit tests`, () => {
         }))}
 
       return chai.expect(action.validateAndExecute(request)).to.be.fulfilled.then(() => {
-        chai.expect(rudderCallSpy).to.have.been.calledWithExactly({
+        // track is invoked as (payload, doneCb); assert only on the payload arg.
+        chai.expect(rudderCallSpy).to.have.been.calledWith({
           userId: "funvalue",
           anonymousId: null,
           event: "funevent",
