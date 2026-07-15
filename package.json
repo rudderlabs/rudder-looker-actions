@@ -34,7 +34,7 @@
   "dependencies": {
     "@google-cloud/storage": "^1.5.2",
     "@hubspot/api-client": "^2.0.1",
-    "@rudderstack/rudder-sdk-node": "^2.0.4",
+    "@rudderstack/rudder-sdk-node": "^0.0.3",
     "@sendgrid/helpers": "7.2.0",
     "@sendgrid/mail": "7.2.2",
     "@slack/web-api": "^6.8.0",

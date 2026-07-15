@@ -3,16 +3,16 @@ import * as util from "util"
 import * as uuid from "uuid"
 import * as winston from "winston"
 import * as Hub from "../../hub"
-import { RudderActionError } from "./rudderstack_error"
-const rudderAnalytics = require("@rudderstack/rudder-sdk-node")
+import {RudderActionError} from "./rudderstack_error"
+const rudder: any = require("@rudderstack/rudder-sdk-node")
 
 interface RudderFields {
-  idFieldNames: string[]
-  idField?: Hub.Field
-  userIdField?: Hub.Field
-  groupIdField?: Hub.Field
-  emailField?: Hub.Field
-  anonymousIdField?: Hub.Field
+  idFieldNames: string[],
+  idField?: Hub.Field,
+  userIdField?: Hub.Field,
+  groupIdField?: Hub.Field,
+  emailField?: Hub.Field,
+  anonymousIdField?: Hub.Field,
 }
 
 export enum RudderTags {
@@ -29,15 +29,12 @@ export enum RudderCalls {
 }
 
 export class RudderAction extends Hub.Action {
-  allowedTags = [
-    RudderTags.Email,
-    RudderTags.UserId,
-    RudderTags.RudderAnonymousId,
-  ]
+
+  allowedTags = [RudderTags.Email, RudderTags.UserId, RudderTags.RudderAnonymousId]
 
   name = "rudder_event"
   label = "Rudder Identify"
-  iconName = "rudderstack/rudderstack.svg"
+  iconName = "rudderstack/rudderstack.png"
   description = "Add traits via identify to your Rudder users."
   params = [
     {
@@ -59,9 +56,7 @@ export class RudderAction extends Hub.Action {
   supportedActionTypes = [Hub.ActionType.Query]
   usesStreaming = true
   supportedFormattings = [Hub.ActionFormatting.Unformatted]
-  supportedVisualizationFormattings = [
-    Hub.ActionVisualizationFormatting.Noapply,
-  ]
+  supportedVisualizationFormattings = [Hub.ActionVisualizationFormatting.Noapply]
   requiredFields = [{ any_tag: this.allowedTags }]
   executeInOwnProcess = true
   supportedFormats = (request: Hub.ActionRequest) => {
@@ -76,19 +71,14 @@ export class RudderAction extends Hub.Action {
     return this.executeRudder(request, RudderCalls.Identify)
   }
 
-  protected async executeRudder(
-    request: Hub.ActionRequest,
-    rudderCall: RudderCalls,
-  ) {
+  protected async executeRudder(request: Hub.ActionRequest, rudderCall: RudderCalls) {
     const rudderClient = this.rudderClientFromRequest(request)
 
     let hiddenFields: string[] = []
-    if (
-      request.scheduledPlan &&
-      request.scheduledPlan.query &&
-      request.scheduledPlan.query.vis_config &&
-      request.scheduledPlan.query.vis_config.hidden_fields
-    ) {
+    if (request.scheduledPlan &&
+        request.scheduledPlan.query &&
+        request.scheduledPlan.query.vis_config &&
+        request.scheduledPlan.query.vis_config.hidden_fields) {
       hiddenFields = request.scheduledPlan.query.vis_config.hidden_fields
     }
 
@@ -107,15 +97,13 @@ export class RudderAction extends Hub.Action {
 
     try {
       let totalRows = 0
-      const totalRequestsCompleted = 0
+      let totalRequestsCompleted = 0
       await request.streamJsonDetail({
         onFields: (fields) => {
           fieldset = Hub.allFields(fields)
           rudderFields = this.rudderFields(fieldset)
-          winston.debug(`[Rudder] fieldset :  ${JSON.stringify(fieldset)}`)
-          winston.debug(
-            `[Rudder] RudderFields : ${JSON.stringify(rudderFields)}`,
-          )
+          winston.info(`[Rudder] fieldset :  ${JSON.stringify(fieldset)}`)
+          winston.info(`[Rudder] RudderFields : ${JSON.stringify(rudderFields)}`)
           this.unassignedRudderFieldsCheck(rudderFields)
         },
         onRanAt: (iso8601string) => {
@@ -125,17 +113,12 @@ export class RudderAction extends Hub.Action {
         },
         onRow: (row) => {
           totalRows = totalRows + 1
-          winston.debug(`[Rudder] row : ${JSON.stringify(row)}`)
+          winston.info(`[Rudder] row : ${JSON.stringify(row)}`)
           this.unassignedRudderFieldsCheck(rudderFields)
           const payload = {
             ...this.prepareRudderTraitsFromRow(
-              row,
-              fieldset,
-              rudderFields!,
-              hiddenFields,
-              rudderCall === RudderCalls.Track,
-            ),
-            ...{ event, context, timestamp },
+              row, fieldset, rudderFields!, hiddenFields, rudderCall === RudderCalls.Track),
+            ...{event, context, timestamp},
           }
           if (payload.groupId === null) {
             delete payload.groupId
@@ -144,13 +127,11 @@ export class RudderAction extends Hub.Action {
             delete payload.event
           }
           try {
-            winston.debug("===calling analytics api===")
-            rudderClient[rudderCall](
-              payload, /*, () => {
+            winston.info("===calling analytics api===")
+            rudderClient[rudderCall](payload, () => {
               totalRequestsCompleted = totalRequestsCompleted + 1
-              winston.debug(`[Rudder] totalRequestsCompletedOnEvents :  ${totalRequestsCompleted}`)
-            }*/
-            )
+              winston.info(`[Rudder] totalRequestsCompletedOnEvents :  ${totalRequestsCompleted}`)
+            })
           } catch (e: any) {
             errors.push(e)
           }
@@ -158,59 +139,71 @@ export class RudderAction extends Hub.Action {
       })
 
       await new Promise<void>(async (resolve, reject) => {
-        winston.debug("[Rudder] calling explicit flush")
-        rudderClient.flush((err: any) => {
-          if (err) {
-            winston.error(`[Rudder] error while flush : ${err}`)
-            reject(err)
-          } else {
-            winston.debug("[Rudder] resolve while flush")
-            resolve()
-          }
-        })
+          winston.info("[Rudder] calling explicit flush")
+          rudderClient.flush( (err: any) => {
+            if (err) {
+              winston.error(`[Rudder] error while flush : ${err}`)
+              reject(err)
+            } else {
+              winston.info("[Rudder] resolve while flush")
+              resolve()
+            }
+          })
       })
 
-      winston.debug(`[Rudder] totalrows : ${totalRows}`)
-      winston.debug(
-        `[Rudder] totalRequestsCompletedAfterRowsCompleted : ${totalRequestsCompleted}`,
-      )
+      winston.info(`[Rudder] totalrows : ${totalRows}`)
+      winston.info(`[Rudder] totalRequestsCompletedAfterRowsCompleted : ${totalRequestsCompleted}`)
+
+      let checkCount = 0
+      await new Promise<void>(async (resolve, reject) => {
+        setInterval(() => {
+          try {
+            winston.info(`[Rudder] totalrows in final promise : ${totalRows}`)
+            winston.info(`[Rudder] totalRequestsCompleted in final promise : ${totalRequestsCompleted}`)
+
+            if (totalRows === totalRequestsCompleted) {
+              resolve()
+            }
+            if (checkCount > 20) {
+              reject(new Error("sending to server took too long..aborting after 20 secs"))
+            }
+            checkCount = checkCount + 1
+          } catch (e) {
+            winston.error(`[Rudder] error in Rudder action execution in final promise : ${e}`)
+            reject(e)
+          }
+
+        }, 1000)
+      })
+
     } catch (e: any) {
       winston.error(`[Rudder] error in Rudder action execution : ${e}`)
       errors.push(e)
     }
 
     if (errors.length > 0) {
-      let msg = errors.map((e) => (e.message ? e.message : e)).join(", ")
+      let msg = errors.map((e) => e.message ? e.message : e).join(", ")
       if (msg.length === 0) {
         msg = "An unknown error occurred while processing the Rudder action."
-        winston.warn(
-          `[Rudder] Can't format Rudder errors: ${util.inspect(errors)}`,
-        )
+        winston.warn(`[Rudder] Can't format Rudder errors: ${util.inspect(errors)}`)
       }
       winston.error(`[Rudder] total errors : ${msg}`)
-      return new Hub.ActionResponse({ success: false, message: msg })
+      return new Hub.ActionResponse({success: false, message: msg})
     } else {
-      winston.debug("[Rudder] no errors in Rudder action execution")
-      return new Hub.ActionResponse({ success: true })
+      winston.info("[Rudder] no errors in Rudder action execution")
+      return new Hub.ActionResponse({success: true})
     }
   }
 
-  protected unassignedRudderFieldsCheck(
-    rudderFields: RudderFields | undefined,
-  ) {
+  protected unassignedRudderFieldsCheck(rudderFields: RudderFields | undefined) {
     if (!(rudderFields && rudderFields.idFieldNames.length > 0)) {
-      throw new RudderActionError(
-        `Query requires a field tagged ${this.allowedTags.join(" or ")}.`,
-      )
+      throw new RudderActionError(`Query requires a field tagged ${this.allowedTags.join(" or ")}.`)
     }
   }
 
   protected taggedFields(fields: Hub.Field[], tags: string[]) {
-    return fields.filter(
-      (f) =>
-        f.tags &&
-        f.tags.length > 0 &&
-        f.tags.some((t: string) => tags.indexOf(t) !== -1),
+    return fields.filter((f) =>
+      f.tags && f.tags.length > 0 && f.tags.some((t: string) => tags.indexOf(t) !== -1),
     )
   }
 
@@ -224,30 +217,21 @@ export class RudderAction extends Hub.Action {
       RudderTags.RudderAnonymousId,
       RudderTags.UserId,
       RudderTags.RudderGroupId,
-    ]).map((f: Hub.Field) => f.name)
+    ]).map((f: Hub.Field) => (f.name))
 
     return {
       idFieldNames,
-      idField: this.taggedField(fields, [
-        RudderTags.UserId,
-        RudderTags.RudderAnonymousId,
-      ]),
+      idField: this.taggedField(fields, [RudderTags.UserId, RudderTags.RudderAnonymousId]),
       userIdField: this.taggedField(fields, [RudderTags.UserId]),
       groupIdField: this.taggedField(fields, [RudderTags.RudderGroupId]),
       emailField: this.taggedField(fields, [RudderTags.Email]),
-      anonymousIdField: this.taggedField(fields, [
-        RudderTags.RudderAnonymousId,
-      ]),
+      anonymousIdField: this.taggedField(fields, [RudderTags.RudderAnonymousId]),
     }
   }
 
   // Removes JsonDetail Cell metadata and only sends relevant nested data to Rudder
   // See JsonDetail.ts to see structure of a JsonDetail Row
-  protected filterJson(
-    jsonRow: any,
-    rudderFields: RudderFields,
-    fieldName: string,
-  ) {
+  protected filterJson(jsonRow: any, rudderFields: RudderFields, fieldName: string) {
     const pivotValues: any = {}
     pivotValues[fieldName] = []
     const filterFunction = (currentObject: any, name: string) => {
@@ -260,9 +244,9 @@ export class RudderAction extends Hub.Action {
               return returnVal
             } else if (rudderFields.idFieldNames.indexOf(key) === -1) {
               const res = filterFunction(currentObject[key], key)
-              if (Object.keys(res).length > 0) {
-                pivotValues[fieldName].push(res)
-              }
+              // NOTE: original worktree code guarded this with `res !== {}`, which
+              // always evaluates true (reference comparison), so `res` was always pushed.
+              pivotValues[fieldName].push(res)
             }
           }
         }
@@ -286,12 +270,8 @@ export class RudderAction extends Hub.Action {
         if (hiddenFields.indexOf(field.name) === -1) {
           let values: any = {}
           if (!row.hasOwnProperty(field.name)) {
-            winston.error(
-              "[Rudder] Field name does not exist for Rudder action",
-            )
-            throw new RudderActionError(
-              `Field id ${field.name} does not exist for JsonDetail.Row`,
-            )
+            winston.error("[Rudder] Field name does not exist for Rudder action")
+            throw new RudderActionError(`Field id ${field.name} does not exist for JsonDetail.Row`)
           }
           if (row[field.name].value) {
             values[field.name] = row[field.name].value
@@ -305,16 +285,13 @@ export class RudderAction extends Hub.Action {
           }
         }
       }
-      if (
-        rudderFields.emailField &&
-        field.name === rudderFields.emailField.name
-      ) {
+      if (rudderFields.emailField && field.name === rudderFields.emailField.name) {
         traits.email = row[field.name].value
       }
     }
-    let userId: string | null = rudderFields.idField
-      ? row[rudderFields.idField.name].value
-      : null
+
+    // If userId tagged column present, take that value as userId
+    let userId: string | null
     if (rudderFields.userIdField) {
       userId = row[rudderFields.userIdField.name].value
     } else {
@@ -326,9 +303,7 @@ export class RudderAction extends Hub.Action {
     } else {
       anonymousId = userId ? null : this.generateAnonymousId()
     }
-    const groupId: string | null = rudderFields.groupIdField
-      ? row[rudderFields.groupIdField.name].value
-      : null
+    const groupId: string | null = rudderFields.groupIdField ? row[rudderFields.groupIdField.name].value : null
 
     const dimensionName = trackCall ? "properties" : "traits"
 
@@ -342,20 +317,13 @@ export class RudderAction extends Hub.Action {
   }
 
   protected rudderClientFromRequest(request: Hub.ActionRequest) {
-    winston.debug(
-      `[Rudder] rudder_write_key : ${request.params.rudder_write_key}`,
-    )
-    winston.debug(
-      `[Rudder] rudder_server_url : ${request.params.rudder_server_url}`,
-    )
-    return new rudderAnalytics(request.params.rudder_write_key as string, {
-      dataPlaneUrl: request.params.rudder_server_url as string,
-    })
+    return new rudder(request.params.rudder_write_key,  request.params.rudder_server_url)
   }
 
   protected generateAnonymousId() {
     return uuid.v4()
   }
+
 }
 
 Hub.addAction(new RudderAction())
