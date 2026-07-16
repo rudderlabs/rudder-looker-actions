@@ -191,7 +191,12 @@ export default class Server implements Hub.RouteBuilder {
     // To provide a health or version check endpoint you should place a status.json file
     // into the project root, which will get served by this endpoint (or 404 otherwise).
     this.app.get("/status", (_req, res) => {
-      res.sendFile(statusJsonPath)
+      let jsonResp;
+      if (fs.existsSync(statusJsonPath)) {
+        jsonResp = JSON.parse(fs.readFileSync(statusJsonPath).toString())
+      }
+      //res.sendFile(statusJsonPath)
+      res.json(jsonResp)
     })
 
   }

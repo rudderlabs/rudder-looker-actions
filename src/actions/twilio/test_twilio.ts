@@ -1,7 +1,7 @@
 import * as chai from "chai"
 import * as sinon from "sinon"
 
-import * as Hub from "../../../src/hub"
+import * as Hub from "../../hub"
 
 import { TwilioAction } from "./twilio"
 

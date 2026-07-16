@@ -2,7 +2,7 @@ import * as dotenv from "dotenv"
 import * as winston from "winston"
 
 import { registerDebugAction } from "../actions/debug/debug"
-import "../actions/index.ts"
+import "../actions"
 import * as Hub from "../hub/index"
 
 dotenv.config()
