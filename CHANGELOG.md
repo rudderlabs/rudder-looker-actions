@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/rudderlabs/rudder-looker-actions/compare/1.5.1...1.5.2) (2026-07-22)
+
+
+### Miscellaneous
+
+* apply security best practices from step security ([#57](https://github.com/rudderlabs/rudder-looker-actions/issues/57)) ([76e9cbf](https://github.com/rudderlabs/rudder-looker-actions/commit/76e9cbf7430c2b1903641630376fe9db524f2c2e))
+
 ## [1.5.1](https://github.com/rudderlabs/rudder-looker-actions/compare/1.5.0...1.5.1) (2026-07-14)
 
 
