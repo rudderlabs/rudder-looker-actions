@@ -13,5 +13,12 @@ export function validate(key: string) {
   if (!nonce || !providedDigest) {
     return false
   }
-  return crypto.timingSafeEqual(Buffer.from(providedDigest), Buffer.from(digest(nonce)))
+  const providedBuffer = Buffer.from(providedDigest)
+  const expectedBuffer = Buffer.from(digest(nonce))
+  // timingSafeEqual throws a RangeError on unequal lengths, so reject a
+  // wrong-length digest before comparing rather than letting it throw.
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false
+  }
+  return crypto.timingSafeEqual(providedBuffer, expectedBuffer)
 }

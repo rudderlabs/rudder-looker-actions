@@ -82,10 +82,17 @@ export default class Server implements Hub.RouteBuilder {
 
   private actionList: {[key: string]: string} = {}
 
+  // Body parser for authenticated POST routes. Mounted per route, after the
+  // auth middleware, so an unauthenticated request is never buffered or parsed.
+  private jsonBodyParser: express.RequestHandler = express.json({limit: "250mb"})
+
+  // Small body parser for the unauthenticated OAuth GET routes, which only need
+  // req.body to default to {}. Bounds what an anonymous caller can make us parse.
+  private oauthJsonParser: express.RequestHandler = express.json({limit: "100kb"})
+
   constructor() {
 
     this.app = express()
-    this.app.use(express.json({limit: "250mb"}))
     this.app.use(expressWinston.logger({
       winstonInstance: winston,
       dynamicMeta: this.requestLog,
@@ -145,7 +152,7 @@ export default class Server implements Hub.RouteBuilder {
     }))
 
     // Initial OAuth flow request from Resource Owner
-    this.app.get("/actions/:actionId/oauth", async (req, res) => {
+    this.oauthRoute("/actions/:actionId/oauth", async (req, res) => {
       const request = Hub.ActionRequest.fromRequest(req)
       const action = await Hub.findAction(req.params.actionId, { lookerVersion: request.lookerVersion })
       if (isOauthAction(action)) {
@@ -158,7 +165,7 @@ export default class Server implements Hub.RouteBuilder {
       }
     })
 
-    this.app.get("/actions/:actionId/oauth_check", async (req, res) => {
+    this.oauthRoute("/actions/:actionId/oauth_check", async (req, res) => {
       const request = Hub.ActionRequest.fromRequest(req)
       const action = await Hub.findAction(req.params.actionId, {lookerVersion: request.lookerVersion})
       if (isOauthAction(action)) {
@@ -170,7 +177,7 @@ export default class Server implements Hub.RouteBuilder {
     })
 
     // Response from Authorization Server with response from OAuth flow
-    this.app.get("/actions/:actionId/oauth_redirect", async (req, res) => {
+    this.oauthRoute("/actions/:actionId/oauth_redirect", async (req, res) => {
       const request = Hub.ActionRequest.fromRequest(req)
       const action = await Hub.findAction(req.params.actionId, { lookerVersion: request.lookerVersion })
       if (isOauthAction(action)) {
@@ -193,6 +200,10 @@ export default class Server implements Hub.RouteBuilder {
     this.app.get("/status", (_req, res) => {
       res.sendFile(statusJsonPath)
     })
+
+    // Must be registered after all routes so it catches errors they throw.
+    // Bound so Express keeps its 4-arg arity (how it detects an error handler).
+    this.app.use(this.handleError.bind(this))
 
   }
 
@@ -235,47 +246,67 @@ export default class Server implements Hub.RouteBuilder {
     }
   }
 
+  // Wraps an async handler so a rejected promise is forwarded to the error
+  // middleware (this.handleError) rather than becoming an unhandled rejection
+  // that crashes the process.
+  private asyncHandler(fn: (req: express.Request, res: express.Response) => Promise<void>): express.RequestHandler {
+    return (req, res, next) => {
+      fn(req, res).catch(next)
+    }
+  }
+
   private route(urlPath: string, fn: (req: express.Request, res: express.Response) => Promise<void>): void {
-    this.app.post(urlPath, async (req, res) => {
+    // Authenticate on headers alone before the body parser runs, so an
+    // unauthenticated request is rejected before its body is buffered or parsed.
+    this.app.post(urlPath, this.authenticate.bind(this), this.jsonBodyParser, this.asyncHandler(async (req, res) => {
       this.logInfo(req, res, "Starting request.")
+      await fn(req, res)
+    }))
+  }
 
-      let ravenTags = {}
+  // Registers an unauthenticated OAuth GET route with a bounded body parser and
+  // crash-safe error handling.
+  private oauthRoute(urlPath: string, fn: (req: express.Request, res: express.Response) => Promise<void>): void {
+    this.app.get(urlPath, this.oauthJsonParser, this.asyncHandler(fn))
+  }
+
+  // Header-only authentication middleware. Runs before any body parser so an
+  // unauthenticated request is rejected before its body is buffered or parsed.
+  private authenticate(req: express.Request, res: express.Response, next: express.NextFunction): void {
+    const headerValue = req.header("authorization")
+    const tokenMatch = headerValue ? headerValue.match(TOKEN_REGEX) : undefined
+    if (!tokenMatch || !apiKey.validate(tokenMatch[1])) {
+      res.status(403)
+      res.json({success: false, error: "Invalid 'Authorization' header."})
+      this.logInfo(req, res, "Unauthorized request.")
+      return
+    }
+    next()
+  }
+
+  // Error-handling middleware. Sends errors thrown by async handlers through
+  // Express instead of letting them become process-killing unhandled rejections.
+  // Registered as the last middleware in the constructor.
+  private handleError(e: any, req: express.Request, res: express.Response, _next: express.NextFunction): void {
+    this.logError(req, res, "Error on request")
+    if (typeof(e) === "string") {
+      if (!res.headersSent) {
+        res.status(404)
+        res.json({success: false, error: e})
+      }
+      this.logError(req, res, e)
+    } else {
+      if (!res.headersSent) {
+        res.status(500)
+        res.json({ success: false, error: "Internal server error." })
+      }
+      this.logError(req, res, e)
       if (useRaven()) {
-        ravenTags = this.requestLog(req, res)
+        // Typed as {} to satisfy Raven's tags index signature, as the original did.
+        const ravenTags: {} = this.requestLog(req, res)
+        Raven.captureException(e, { tags: ravenTags })
       }
-
-      const headerValue = req.header("authorization")
-      const tokenMatch = headerValue ? headerValue.match(TOKEN_REGEX) : undefined
-      if (!tokenMatch || !apiKey.validate(tokenMatch[1])) {
-        res.status(403)
-        res.json({success: false, error: "Invalid 'Authorization' header."})
-        this.logInfo(req, res, "Unauthorized request.")
-        return
-      }
-
-      try {
-        await fn(req, res)
-      } catch (e: any) {
-        this.logError(req, res, "Error on request")
-        if (typeof(e) === "string") {
-          if (!res.headersSent) {
-            res.status(404)
-            res.json({success: false, error: e})
-          }
-          this.logError(req, res, e)
-        } else {
-          if (!res.headersSent) {
-            res.status(500)
-            res.json({ success: false, error: "Internal server error." })
-          }
-          this.logError(req, res, e)
-          if (useRaven()) {
-            Raven.captureException(e, { tags: ravenTags })
-          }
-        }
-      }
-
-    })
+    }
   }
 
   private logPromiseFail(req: express.Request, res: express.Response, e: any) {
