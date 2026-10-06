@@ -68,10 +68,10 @@ jobs:
       fail-fast: false
       matrix:
         build-config:
-          - os: [self-hosted, Linux, ARM64]
+          - os: arc-arm64
             arch: arm64
             platform: linux/arm64
-          - os: [self-hosted, Linux, X64]
+          - os: arc-amd64
             arch: amd64
             platform: linux/amd64
     runs-on: ${{ matrix.build-config.os }}
