@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.2](https://github.com/rudderlabs/rudder-looker-actions/compare/1.5.1...1.5.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* **server:** authenticate before parsing and prevent unauthenticated DoS crashes ([#68](https://github.com/rudderlabs/rudder-looker-actions/issues/68)) ([42f9ed3](https://github.com/rudderlabs/rudder-looker-actions/commit/42f9ed3a13d21578f4afb6a96b6b208226dee25d))
+
+
+### Miscellaneous
+
+* apply security best practices from step security ([#57](https://github.com/rudderlabs/rudder-looker-actions/issues/57)) ([76e9cbf](https://github.com/rudderlabs/rudder-looker-actions/commit/76e9cbf7430c2b1903641630376fe9db524f2c2e))
+
 ## [1.5.1](https://github.com/rudderlabs/rudder-looker-actions/compare/1.5.0...1.5.1) (2026-07-14)
 
 
