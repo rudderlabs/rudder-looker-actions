@@ -13,5 +13,13 @@ export function validate(key: string) {
   if (!nonce || !providedDigest) {
     return false
   }
-  return crypto.timingSafeEqual(Buffer.from(providedDigest), Buffer.from(digest(nonce)))
+  const providedBuffer = Buffer.from(providedDigest)
+  const expectedBuffer = Buffer.from(digest(nonce))
+  try {
+    return crypto.timingSafeEqual(providedBuffer, expectedBuffer)
+  } catch (_e) {
+    // timingSafeEqual throws (e.g. a RangeError on unequal digest lengths) for
+    // malformed tokens; treat any comparison failure as an invalid token.
+    return false
+  }
 }
