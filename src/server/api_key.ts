@@ -15,10 +15,11 @@ export function validate(key: string) {
   }
   const providedBuffer = Buffer.from(providedDigest)
   const expectedBuffer = Buffer.from(digest(nonce))
-  // timingSafeEqual throws a RangeError on unequal lengths, so reject a
-  // wrong-length digest before comparing rather than letting it throw.
-  if (providedBuffer.length !== expectedBuffer.length) {
+  try {
+    return crypto.timingSafeEqual(providedBuffer, expectedBuffer)
+  } catch (_e) {
+    // timingSafeEqual throws (e.g. a RangeError on unequal digest lengths) for
+    // malformed tokens; treat any comparison failure as an invalid token.
     return false
   }
-  return crypto.timingSafeEqual(providedBuffer, expectedBuffer)
 }
