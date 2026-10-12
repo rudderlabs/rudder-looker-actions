@@ -15,6 +15,12 @@ const INVALID_DATA_PLANE_URL_MESSAGE =
   "Rudder Data Plane URL must be a valid https URL."
 // The SDK silently drops events once this many are queued in a single client.
 const SDK_MAX_INTERNAL_QUEUE_SIZE = 20000
+// Upper bound for RUDDER_SDK_MAX_PENDING_EVENTS. Pausing the stream takes effect
+// between chunks, so rows already parsed from the current chunk (at most ~64 KB,
+// i.e. a few thousand of the smallest possible rows) still arrive after a pause.
+// Keeping the limit at half the SDK's drop threshold leaves room for that overshoot
+// even with a single client.
+const MAX_PENDING_EVENTS_CAP = SDK_MAX_INTERNAL_QUEUE_SIZE / 2
 // While events are pending, queued events are flushed at this interval so batches
 // smaller than flushAt don't wait for the SDK's own 10s flush timer.
 const PENDING_FLUSH_INTERVAL_MS = 500
@@ -103,13 +109,14 @@ export function parseRudderSdkSettings(
       `below flushAt x clientPoolSize (${fullBatchesPending})`,
     )
   }
-  // A client's queue only holds pending events, so keeping the total pending below
-  // the SDK's silent-drop threshold guarantees no client ever drops an event
-  // without calling its callback.
-  if (maxPendingEvents >= SDK_MAX_INTERNAL_QUEUE_SIZE) {
-    maxPendingEvents = SDK_MAX_INTERNAL_QUEUE_SIZE - 1
+  // A client's queue only holds pending events, so keeping the total pending (plus
+  // the post-pause overshoot) below the SDK's silent-drop threshold guarantees no
+  // client ever drops an event without calling its callback.
+  if (maxPendingEvents > MAX_PENDING_EVENTS_CAP) {
+    maxPendingEvents = MAX_PENDING_EVENTS_CAP
     adjustmentReasons.push(
-      `capped below the SDK queue limit (${SDK_MAX_INTERNAL_QUEUE_SIZE})`,
+      `capped at ${MAX_PENDING_EVENTS_CAP} to leave headroom below ` +
+        `the SDK queue limit (${SDK_MAX_INTERNAL_QUEUE_SIZE})`,
     )
   }
   if (adjustmentReasons.length > 0) {
@@ -164,6 +171,24 @@ export function pickClientIndex(routingKey: string, poolSize: number): number {
     hash = (hash * 33 + routingKey.charCodeAt(i)) % ROUTING_HASH_MODULUS
   }
   return hash % poolSize
+}
+
+/**
+ * Waits for `work` to settle or for `timeoutMs` to pass, whichever is first.
+ * Work that runs past the timeout carries on in the background.
+ */
+async function settlesWithin(work: Promise<void>, timeoutMs: number) {
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs)
+  })
+  try {
+    await Promise.race([work, timeout])
+  } finally {
+    if (timer) {
+      clearTimeout(timer)
+    }
+  }
 }
 
 function toError(error: unknown): Error {
@@ -370,8 +395,13 @@ export class RudderAction extends Hub.Action {
     // stopped early, so wait for every callback before responding, up to a limit.
     let unconfirmed = 0
     try {
-      await this.flushClients(clients)
-      const drained = await tracker.waitForDrain(this.drainTimeoutMs)
+      // One deadline covers both the final flush and the wait for callbacks, so a
+      // slow or stuck flush can't push the response past the drain timeout.
+      const deadline = Date.now() + this.drainTimeoutMs
+      await settlesWithin(this.flushClients(clients), this.drainTimeoutMs)
+      const drained = await tracker.waitForDrain(
+        Math.max(0, deadline - Date.now()),
+      )
       if (!drained) {
         unconfirmed = tracker.pending
       }

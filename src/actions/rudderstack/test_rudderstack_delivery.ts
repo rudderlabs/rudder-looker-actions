@@ -113,20 +113,26 @@ describe("RudderStack delivery", () => {
           RUDDER_SDK_FLUSH_AT: "5000",
           RUDDER_SDK_CLIENT_POOL_SIZE: "8",
         })
-        chai.expect(settings.maxPendingEvents).to.equal(19999)
+        chai.expect(settings.maxPendingEvents).to.equal(10000)
         chai.expect(warn.callCount).to.equal(1)
         chai.expect(warn.firstCall.args[0]).to.equal(
-          "[Rudder] RUDDER_SDK_MAX_PENDING_EVENTS=1600 adjusted to 19999: " +
-            "below flushAt x clientPoolSize (40000); capped below the SDK queue limit (20000)",
+          "[Rudder] RUDDER_SDK_MAX_PENDING_EVENTS=1600 adjusted to 10000: " +
+            "below flushAt x clientPoolSize (40000); " +
+            "capped at 10000 to leave headroom below the SDK queue limit (20000)",
         )
       } finally {
         warn.restore()
       }
     })
 
-    it("keeps max pending events below the SDK drop threshold", () => {
-      chai.expect(parseRudderSdkSettings({ RUDDER_SDK_MAX_PENDING_EVENTS: "50000" }).maxPendingEvents)
-        .to.equal(19999)
+    it("caps max pending events at half the SDK drop threshold", () => {
+      chai.expect(parseRudderSdkSettings({ RUDDER_SDK_MAX_PENDING_EVENTS: "15000" }).maxPendingEvents)
+        .to.equal(10000)
+    })
+
+    it("accepts max pending events at the cap", () => {
+      chai.expect(parseRudderSdkSettings({ RUDDER_SDK_MAX_PENDING_EVENTS: "10000" }).maxPendingEvents)
+        .to.equal(10000)
     })
   })
 
@@ -281,6 +287,18 @@ describe("RudderStack delivery", () => {
     it("responds after the drain timeout when callbacks never arrive", async () => {
       // Calls are accepted but never acknowledged.
       const stalledAction = new TestRudderIdentifyAction(() => fakeRudderClient(), { drainTimeoutMs: 30 })
+      const warn = sandbox.stub(winston, "warn")
+
+      const response = await stalledAction.validateAndExecute(identifyRequest(3))
+      chai.expect(response.success).to.equal(true)
+      chai.expect(warn.calledWithMatch("[Rudder] 3 of 3 events had no delivery result")).to.equal(true)
+    })
+
+    it("responds within the drain timeout when a flush never settles", async () => {
+      const stalledAction = new TestRudderIdentifyAction(
+        () => fakeRudderClient({ flush: async () => new Promise<void>(() => undefined) }),
+        { drainTimeoutMs: 30 },
+      )
       const warn = sandbox.stub(winston, "warn")
 
       const response = await stalledAction.validateAndExecute(identifyRequest(3))
