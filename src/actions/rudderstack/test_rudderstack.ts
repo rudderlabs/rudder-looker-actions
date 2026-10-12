@@ -4,21 +4,15 @@ import * as sinon from "sinon"
 import * as Hub from "../../hub"
 import * as apiKey from "../../server/api_key"
 import Server from "../../server/server"
-import { RudderAction } from "./rudderstack"
+import { DeliveryCallback, RudderAction } from "./rudderstack"
+import { fakeRudderClient, queryHidingFields, TestRudderIdentifyAction } from "./test_rudderstack_helpers"
 
 const action = new RudderAction()
 action.executeInOwnProcess = false
 
-function expectRudderMatch(request: Hub.ActionRequest, match: any) {
-  const rudderCallSpy = sinon.spy()
-  const stubClient = sinon
-    .stub(action as any, "rudderClientFromRequest")
-    .callsFake(() => {
-      return { identify: rudderCallSpy, flush: (cb: () => void) => cb() }
-    })
-  const stubAnon = sinon
-    .stub(action as any, "generateAnonymousId")
-    .callsFake(() => "stubanon")
+function expectRudderMatch(request: Hub.ActionRequest, match: object) {
+  const rudderCallSpy = sinon.spy((_message: unknown, done: DeliveryCallback) => done())
+  const testAction = new TestRudderIdentifyAction(() => fakeRudderClient({ identify: rudderCallSpy }))
 
   const now = new Date()
   const clock = sinon.useFakeTimers(now.getTime())
@@ -35,11 +29,9 @@ function expectRudderMatch(request: Hub.ActionRequest, match: any) {
   }
   const merged = { ...baseMatch, ...match }
   return chai
-    .expect(action.validateAndExecute(request))
+    .expect(testAction.validateAndExecute(request))
     .to.be.fulfilled.then(() => {
-      chai.expect(rudderCallSpy).to.have.been.calledWithExactly(merged)
-      stubClient.restore()
-      stubAnon.restore()
+      chai.expect(rudderCallSpy).to.have.been.calledWithExactly(merged, sinon.match.func)
       clock.restore()
     })
 }
@@ -51,7 +43,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -72,7 +64,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -94,7 +86,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -124,7 +116,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -156,7 +148,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -190,7 +182,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -229,7 +221,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -260,7 +252,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -285,7 +277,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -308,12 +300,8 @@ describe(`${action.constructor.name} unit tests`, () => {
         ),
       }
       request.scheduledPlan = {
-        query: {
-          vis_config: {
-            hidden_fields: ["hiddenfield"],
-          },
-        },
-      } as any
+        query: queryHidingFields(["hiddenfield"]),
+      }
       return expectRudderMatch(request, {
         anonymousId: "stubanon",
         userId: null,
@@ -329,7 +317,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -350,7 +338,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -374,7 +362,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       return chai
         .expect(action.validateAndExecute(request))
@@ -388,7 +376,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(
@@ -414,7 +402,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       request.type = Hub.ActionType.Query
       request.params = {
         rudder_write_key: "mykey",
-        rudder_server_url: "http://localhost:8080",
+        rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {
         dataBuffer: Buffer.from(

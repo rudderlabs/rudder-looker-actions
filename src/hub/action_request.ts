@@ -35,6 +35,20 @@ export interface ParamMap {
   [name: string]: string | undefined
 }
 
+/**
+ * Lets an action slow down the incoming data stream when it cannot keep up,
+ * e.g. while it waits for outbound requests to complete.
+ */
+export interface StreamFlowControl {
+  pause(): void
+  resume(): void
+}
+
+// Attachment data is written to the stream in slices of this size so that a
+// paused stream takes effect between slices rather than after the whole payload.
+const ATTACHMENT_STREAM_CHUNK_BYTES = 64 * 1024
+const JSON_DETAIL_PARSE_ERROR_MESSAGE = "Failed to parse the json_detail data stream."
+
 export interface ActionAttachment {
   dataBuffer?: Buffer
   encoding?: BufferEncoding
@@ -239,8 +253,11 @@ export class ActionRequest {
       } else {
         if (this.attachment && this.attachment.dataBuffer) {
           winston.info(`Using "fake" streaming because request contained attachment data.`, this.logInfo)
-          winston.info(`DataBuffer: ${this.attachment.dataBuffer.length}`)
-          stream.write(this.attachment.dataBuffer)
+          const dataBuffer = this.attachment.dataBuffer
+          winston.info(`DataBuffer: ${dataBuffer.length}`)
+          for (let offset = 0; offset < dataBuffer.length; offset += ATTACHMENT_STREAM_CHUNK_BYTES) {
+            stream.write(dataBuffer.subarray(offset, offset + ATTACHMENT_STREAM_CHUNK_BYTES))
+          }
           stream.end()
           resolve()
         } else {
@@ -316,34 +333,55 @@ export class ActionRequest {
    *
    * @returns A promise that will be resolved when streaming is complete.
    * @param callbacks An object consisting of several callbacks that will be called
-   * when various parts of the data are parsed.
+   * when various parts of the data are parsed. `onFlowControl`, if provided, is called
+   * once before parsing starts with controls to pause and resume the incoming stream;
+   * rows already parsed from the current chunk may still arrive after a pause.
    */
   async streamJsonDetail(callbacks: {
     onRow: (row: JsonDetailRow) => void,
     onFields?: (fields: Fieldset) => void,
     onRanAt?: (iso8601string: string) => void,
+    onFlowControl?: (control: StreamFlowControl) => void,
   }) {
     return new Promise<void>((resolve, reject) => {
       let rows = 0
       this.stream(async (readable) => {
-        oboe(readable)
-          .node("!.data.*", this.safeOboe(readable, reject, (row) => {
-            rows++
-            callbacks.onRow(row)
-          }))
-          .node("!.fields", this.safeOboe(readable, reject, (fields) => {
-            if (callbacks.onFields) {
-              callbacks.onFields(fields)
-            }
-          }))
-          .node("!.ran_at", this.safeOboe(readable, reject, (ranAt) => {
-            if (callbacks.onRanAt) {
-              callbacks.onRanAt(ranAt)
-            }
-          }))
-          .done(() => {
-            winston.info(`[streamJsonDetail] oboe reports done`, {...this.logInfo, rows})
+        if (callbacks.onFlowControl) {
+          callbacks.onFlowControl({
+            pause: () => { readable.pause() },
+            resume: () => { readable.resume() },
           })
+        }
+        // Resolve only once oboe has parsed the whole document. The stream can finish
+        // while parsed-but-undelivered data is still buffered (e.g. while paused), so
+        // waiting on the stream alone could resolve before every row reached onRow.
+        await new Promise<void>((resolveParsed, rejectParsed) => {
+          oboe(readable)
+            .node("!.data.*", this.safeOboe(readable, reject, (row) => {
+              rows++
+              callbacks.onRow(row)
+            }))
+            .node("!.fields", this.safeOboe(readable, reject, (fields) => {
+              if (callbacks.onFields) {
+                callbacks.onFields(fields)
+              }
+            }))
+            .node("!.ran_at", this.safeOboe(readable, reject, (ranAt) => {
+              if (callbacks.onRanAt) {
+                callbacks.onRanAt(ranAt)
+              }
+            }))
+            .done(() => {
+              winston.info(`[streamJsonDetail] oboe reports done`, {...this.logInfo, rows})
+              resolveParsed()
+            })
+            .fail(() => {
+              // oboe's failure report can quote the payload, which may contain user
+              // data, so it is replaced with a generic error.
+              winston.info(`[streamJsonDetail] oboe reports failure`, {...this.logInfo, rows})
+              rejectParsed(new Error(JSON_DETAIL_PARSE_ERROR_MESSAGE))
+            })
+        })
       }).then(() => {
         winston.info(`[streamJsonDetail] complete`, {...this.logInfo, rows})
         resolve()

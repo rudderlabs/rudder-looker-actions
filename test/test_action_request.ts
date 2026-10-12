@@ -2,7 +2,7 @@ import * as chai from "chai"
 import * as semver from "semver"
 import {mockReq} from "sinon-express-mock"
 
-import { ActionRequest } from "../src/hub"
+import { ActionRequest, StreamFlowControl } from "../src/hub"
 
 describe("ActionRequest", () => {
   it("fromRequest", () => {
@@ -138,6 +138,71 @@ describe("ActionRequest", () => {
       const result = ActionRequest.fromRequest(req)
 
       chai.expect(result.completeFilename()).to.equal(result.suggestedFilename())
+    })
+  })
+
+  describe("streamJsonDetail flow control", () => {
+    // ~300 KB of rows, so the attachment is streamed in several 64 KB slices.
+    const totalRows = 5000
+    function largeAttachmentRequest() {
+      const request = new ActionRequest()
+      const data = []
+      for (let i = 0; i < totalRows; i++) {
+        data.push({ field: { value: `row-${i}-${"x".repeat(40)}` } })
+      }
+      request.attachment = {
+        dataBuffer: Buffer.from(JSON.stringify({ fields: { dimensions: [] }, data })),
+      }
+      return request
+    }
+
+    it("rejects a malformed payload instead of resolving", async () => {
+      const request = new ActionRequest()
+      request.attachment = { dataBuffer: Buffer.from('{"fields": {"dimensions": []}, "data": [{"a": ') }
+      let rejected: unknown
+      try {
+        await request.streamJsonDetail({ onRow: () => undefined })
+      } catch (e) {
+        rejected = e
+      }
+      chai.expect(rejected).to.be.instanceOf(Error)
+      chai.expect((rejected instanceof Error) && rejected.message).to.equal(
+        "Failed to parse the json_detail data stream.",
+      )
+    })
+
+    it("streams every row when no flow control is requested", async () => {
+      let rows = 0
+      await largeAttachmentRequest().streamJsonDetail({ onRow: () => { rows++ } })
+      chai.expect(rows).to.equal(totalRows)
+    })
+
+    it("stops delivering rows while paused and resumes on request", async () => {
+      let rows = 0
+      let control: StreamFlowControl | undefined
+      const streamed = largeAttachmentRequest().streamJsonDetail({
+        onFlowControl: (flowControl) => { control = flowControl },
+        onRow: () => {
+          rows++
+          if (rows === 1 && control) {
+            control.pause()
+          }
+        },
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const rowsWhilePaused = rows
+      chai.expect(rowsWhilePaused).to.be.greaterThan(0)
+      chai.expect(rowsWhilePaused).to.be.lessThan(totalRows)
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      chai.expect(rows).to.equal(rowsWhilePaused)
+
+      if (control) {
+        control.resume()
+      }
+      await streamed
+      chai.expect(rows).to.equal(totalRows)
     })
   })
 })

@@ -2,7 +2,10 @@ import * as chai from "chai"
 import * as sinon from "sinon"
 
 import * as Hub from "../../hub"
+import { DeliveryCallback } from "./rudderstack"
 import { RudderTrackAction } from "./rudderstack_track"
+import { fakeRudderClient } from "./test_rudderstack_helpers"
+import { TestRudderTrackAction } from "./test_rudderstack_track_action"
 
 const action = new RudderTrackAction()
 action.executeInOwnProcess = false
@@ -12,12 +15,8 @@ describe(`${action.constructor.name} unit tests`, () => {
   describe("action", () => {
 
     it ("calls track", () => {
-      const rudderCallSpy = sinon.spy()
-      const stubClient = sinon.stub(action as any, "rudderClientFromRequest")
-        .callsFake(() => {
-          return {track: rudderCallSpy, flush: (cb: () => void) => cb()}
-        })
-      const stubAnon = sinon.stub(action as any, "generateAnonymousId").callsFake(() => "stubanon")
+      const rudderCallSpy = sinon.spy((_message: unknown, done: DeliveryCallback) => done())
+      const testAction = new TestRudderTrackAction(() => fakeRudderClient({ track: rudderCallSpy }))
 
       const now = new Date()
       const clock = sinon.useFakeTimers(now.getTime())
@@ -28,14 +27,14 @@ describe(`${action.constructor.name} unit tests`, () => {
       }
       request.type = Hub.ActionType.Query
       request.params = {
-        rudder_write_key: "mykey", rudder_server_url: "http://localhost:8080",
+        rudder_write_key: "mykey", rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
           fields: {dimensions: [{name: "coolfield", tags: ["user_id"]}]},
           data: [{coolfield: {value: "funvalue"}}],
         }))}
 
-      return chai.expect(action.validateAndExecute(request)).to.be.fulfilled.then(() => {
+      return chai.expect(testAction.validateAndExecute(request)).to.be.fulfilled.then(() => {
         chai.expect(rudderCallSpy).to.have.been.calledWithExactly({
           userId: "funvalue",
           anonymousId: null,
@@ -48,9 +47,7 @@ describe(`${action.constructor.name} unit tests`, () => {
             },
           },
           timestamp: now,
-        })
-        stubClient.restore()
-        stubAnon.restore()
+        }, sinon.match.func)
         clock.restore()
       })
     })
