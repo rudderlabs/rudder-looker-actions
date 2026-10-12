@@ -254,6 +254,7 @@ export class RudderAction extends Hub.Action {
   requiredFields = [{ any_tag: this.allowedTags }]
   executeInOwnProcess = true
   protected drainTimeoutMs = DRAIN_TIMEOUT_MS
+  protected sdkSettings: RudderSdkSettings = RUDDER_SDK_SETTINGS
   supportedFormats = (request: Hub.ActionRequest) => {
     if (request.lookerVersion && semver.gte(request.lookerVersion, "6.2.0")) {
       return [Hub.ActionFormat.JsonDetailLiteStream]
@@ -284,11 +285,13 @@ export class RudderAction extends Hub.Action {
     }
 
     const clients = Array.from(
-      { length: RUDDER_SDK_SETTINGS.clientPoolSize },
+      { length: this.sdkSettings.clientPoolSize },
       () => this.createRudderClient(writeKey, dataPlaneUrl),
     )
+    // A stream paused with no delivery progress for the drain timeout is aborted.
     const tracker = new RudderDeliveryTracker(
-      RUDDER_SDK_SETTINGS.maxPendingEvents,
+      this.sdkSettings.maxPendingEvents,
+      this.drainTimeoutMs,
     )
 
     let hiddenFields: string[] = []
@@ -387,8 +390,18 @@ export class RudderAction extends Hub.Action {
         },
       })
     } catch (e) {
-      winston.error(`[Rudder] error in Rudder action execution : ${e}`)
-      errors.push(toError(e))
+      if (tracker.stalled) {
+        // Like delivery failures, a stall doesn't fail the action: a rerun would
+        // resend every row. Rows not yet read are never sent, so it is logged.
+        winston.warn(
+          `[Rudder] delivery stalled: no delivery result for ${this.drainTimeoutMs}ms ` +
+            `while paused; stopped streaming after ${totalRows} rows`,
+          { webhookId: request.webhookId },
+        )
+      } else {
+        winston.error(`[Rudder] error in Rudder action execution : ${e}`)
+        errors.push(toError(e))
+      }
     }
 
     // Events already handed to the SDK are delivered (or fail) even if streaming
@@ -407,6 +420,7 @@ export class RudderAction extends Hub.Action {
       }
     } finally {
       clearInterval(pendingFlushTimer)
+      tracker.stop()
     }
 
     winston.info("[Rudder] execute summary", {
@@ -416,8 +430,9 @@ export class RudderAction extends Hub.Action {
       acked: tracker.acked,
       failed: tracker.failed,
       unconfirmed,
+      streamStopped: tracker.stalled,
       durationMs: Date.now() - startedAt,
-      ...RUDDER_SDK_SETTINGS,
+      ...this.sdkSettings,
     })
 
     if (unconfirmed > 0) {
@@ -609,10 +624,10 @@ export class RudderAction extends Hub.Action {
   ): RudderClient {
     const options: RudderClientOptions = {
       dataPlaneUrl,
-      flushAt: RUDDER_SDK_SETTINGS.flushAt,
+      flushAt: this.sdkSettings.flushAt,
       // Without a timeout a stalled connection never settles, so its events never
       // get a delivery callback.
-      timeout: RUDDER_SDK_SETTINGS.requestTimeoutMs,
+      timeout: this.sdkSettings.requestTimeoutMs,
       // Failures are counted through each event's callback. Without a handler the
       // SDK rethrows them from flush() as unhandled rejections, crashing the process.
       errorHandler: (error: unknown) => {

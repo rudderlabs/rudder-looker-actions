@@ -1,5 +1,5 @@
 import { Query } from "../../api_types/query"
-import { DeliveryCallback, RudderAction, RudderClient } from "./rudderstack"
+import { DeliveryCallback, RudderAction, RudderClient, RudderSdkSettings } from "./rudderstack"
 
 export const STUB_ANONYMOUS_ID = "stubanon"
 
@@ -24,6 +24,7 @@ export function ackingRudderClient(overrides: Partial<RudderClient> = {}): Rudde
 
 export interface TestActionOptions {
   drainTimeoutMs?: number
+  sdkSettings?: Partial<RudderSdkSettings>
 }
 
 // Each real action class gets a subclass that only swaps in fake SDK clients and a
@@ -37,6 +38,9 @@ export class TestRudderIdentifyAction extends RudderAction {
     this.executeInOwnProcess = false
     if (options.drainTimeoutMs !== undefined) {
       this.drainTimeoutMs = options.drainTimeoutMs
+    }
+    if (options.sdkSettings) {
+      this.sdkSettings = { ...this.sdkSettings, ...options.sdkSettings }
     }
   }
 

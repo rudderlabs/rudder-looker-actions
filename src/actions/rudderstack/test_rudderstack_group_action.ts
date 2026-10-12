@@ -9,6 +9,9 @@ export class TestRudderGroupAction extends RudderGroupAction {
     if (options.drainTimeoutMs !== undefined) {
       this.drainTimeoutMs = options.drainTimeoutMs
     }
+    if (options.sdkSettings) {
+      this.sdkSettings = { ...this.sdkSettings, ...options.sdkSettings }
+    }
   }
 
   protected createRudderClient(writeKey: string, dataPlaneUrl: string) {

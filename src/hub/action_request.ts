@@ -42,6 +42,8 @@ export interface ParamMap {
 export interface StreamFlowControl {
   pause(): void
   resume(): void
+  /** Stops reading the stream; the streaming call rejects with `reason`. */
+  abort(reason: Error): void
 }
 
 // Attachment data is written to the stream in slices of this size so that a
@@ -346,17 +348,24 @@ export class ActionRequest {
     return new Promise<void>((resolve, reject) => {
       let rows = 0
       this.stream(async (readable) => {
-        if (callbacks.onFlowControl) {
-          callbacks.onFlowControl({
-            pause: () => { readable.pause() },
-            resume: () => { readable.resume() },
-          })
-        }
         // Resolve only once oboe has parsed the whole document. The stream can finish
         // while parsed-but-undelivered data is still buffered (e.g. while paused), so
         // waiting on the stream alone could resolve before every row reached onRow.
         await new Promise<void>((resolveParsed, rejectParsed) => {
-          oboe(readable)
+          const parser = oboe(readable)
+          if (callbacks.onFlowControl) {
+            callbacks.onFlowControl({
+              pause: () => { readable.pause() },
+              resume: () => { readable.resume() },
+              abort: (reason: Error) => {
+                winston.info(`[streamJsonDetail] aborted by action`, {...this.logInfo, rows})
+                parser.abort()
+                readable.destroy()
+                rejectParsed(reason)
+              },
+            })
+          }
+          parser
             .node("!.data.*", this.safeOboe(readable, reject, (row) => {
               rows++
               callbacks.onRow(row)

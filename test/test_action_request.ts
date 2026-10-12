@@ -171,6 +171,35 @@ describe("ActionRequest", () => {
       )
     })
 
+    it("rejects with the abort reason and stops delivering rows", async () => {
+      let rows = 0
+      let control: StreamFlowControl | undefined
+      const streamed = largeAttachmentRequest().streamJsonDetail({
+        onFlowControl: (flowControl) => { control = flowControl },
+        onRow: () => {
+          rows++
+          if (rows === 1 && control) {
+            control.pause()
+          }
+        },
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      const rowsAtAbort = rows
+      if (control) {
+        control.abort(new Error("stalled"))
+      }
+      let rejected: unknown
+      try {
+        await streamed
+      } catch (e) {
+        rejected = e
+      }
+      chai.expect((rejected instanceof Error) && rejected.message).to.equal("stalled")
+      chai.expect(rows).to.equal(rowsAtAbort)
+      chai.expect(rows).to.be.lessThan(totalRows)
+    })
+
     it("streams every row when no flow control is requested", async () => {
       let rows = 0
       await largeAttachmentRequest().streamJsonDetail({ onRow: () => { rows++ } })

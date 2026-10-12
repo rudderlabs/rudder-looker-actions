@@ -33,7 +33,7 @@ function identifyRequest(rows: number, serverUrl = "https://localhost:8080") {
 }
 
 function flowControlSpy() {
-  return { pause: sinon.spy(), resume: sinon.spy() }
+  return { pause: sinon.spy(), resume: sinon.spy(), abort: sinon.spy() }
 }
 
 describe("RudderStack delivery", () => {
@@ -160,7 +160,7 @@ describe("RudderStack delivery", () => {
   describe("RudderDeliveryTracker", () => {
     it("pauses at the pending limit and resumes at half of it", () => {
       const control = flowControlSpy()
-      const tracker = new RudderDeliveryTracker(4)
+      const tracker = new RudderDeliveryTracker(4, 1000)
       tracker.setFlowControl(control)
 
       for (let i = 0; i < 4; i++) {
@@ -176,16 +176,17 @@ describe("RudderStack delivery", () => {
 
     it("does not pause again while already paused", () => {
       const control = flowControlSpy()
-      const tracker = new RudderDeliveryTracker(2)
+      const tracker = new RudderDeliveryTracker(2, 1000)
       tracker.setFlowControl(control)
       for (let i = 0; i < 5; i++) {
         tracker.markSent()
       }
       chai.expect(control.pause.callCount).to.equal(1)
+      tracker.stop()
     })
 
     it("counts failures and keeps the first error messages", () => {
-      const tracker = new RudderDeliveryTracker(100)
+      const tracker = new RudderDeliveryTracker(100, 1000)
       for (let i = 0; i < 5; i++) {
         tracker.markSent()
         tracker.onEventDone(new Error(`failure ${i}`))
@@ -195,7 +196,7 @@ describe("RudderStack delivery", () => {
     })
 
     it("reports each distinct error message once", () => {
-      const tracker = new RudderDeliveryTracker(100)
+      const tracker = new RudderDeliveryTracker(100, 1000)
       const messages = ["status 400", "status 400", "status 502", "status 400"]
       messages.forEach((message) => {
         tracker.markSent()
@@ -205,8 +206,40 @@ describe("RudderStack delivery", () => {
       chai.expect(tracker.errorMessages).to.deep.equal(["status 400", "status 502"])
     })
 
+    it("aborts the stream when paused with no delivery result for the stall timeout", async () => {
+      const control = flowControlSpy()
+      const tracker = new RudderDeliveryTracker(2, 20)
+      tracker.setFlowControl(control)
+      tracker.markSent()
+      tracker.markSent()
+
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      chai.expect(control.abort.calledOnce).to.equal(true)
+      chai.expect(tracker.stalled).to.equal(true)
+    })
+
+    it("does not abort while delivery keeps progressing", async () => {
+      const control = flowControlSpy()
+      const tracker = new RudderDeliveryTracker(4, 40)
+      tracker.setFlowControl(control)
+      for (let i = 0; i < 4; i++) {
+        tracker.markSent()
+      }
+
+      // Each callback inside the stall window restarts it; the second one resumes.
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      tracker.onEventDone()
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      tracker.onEventDone()
+      await new Promise((resolve) => setTimeout(resolve, 60))
+
+      chai.expect(control.resume.calledOnce).to.equal(true)
+      chai.expect(control.abort.called).to.equal(false)
+      chai.expect(tracker.stalled).to.equal(false)
+    })
+
     it("does not count an event the SDK rejected before queueing", () => {
-      const tracker = new RudderDeliveryTracker(100)
+      const tracker = new RudderDeliveryTracker(100, 1000)
       tracker.markSent()
       tracker.revertSent()
       chai.expect(tracker.sent).to.equal(0)
@@ -214,7 +247,7 @@ describe("RudderStack delivery", () => {
     })
 
     it("resolves the drain only once every event has a callback", async () => {
-      const tracker = new RudderDeliveryTracker(100)
+      const tracker = new RudderDeliveryTracker(100, 1000)
       tracker.markSent()
       tracker.markSent()
       let drained = false
@@ -230,7 +263,7 @@ describe("RudderStack delivery", () => {
     })
 
     it("gives up on the drain after the timeout", async () => {
-      const tracker = new RudderDeliveryTracker(100)
+      const tracker = new RudderDeliveryTracker(100, 1000)
       tracker.markSent()
       chai.expect(await tracker.waitForDrain(20)).to.equal(false)
       chai.expect(tracker.pending).to.equal(1)
@@ -304,6 +337,22 @@ describe("RudderStack delivery", () => {
       const response = await stalledAction.validateAndExecute(identifyRequest(3))
       chai.expect(response.success).to.equal(true)
       chai.expect(warn.calledWithMatch("[Rudder] 3 of 3 events had no delivery result")).to.equal(true)
+    })
+
+    it("stops streaming and still responds when delivery stalls while paused", async () => {
+      // Calls are accepted but never acknowledged, and the stream pauses after 2 events.
+      const stalledAction = new TestRudderIdentifyAction(() => fakeRudderClient(), {
+        drainTimeoutMs: 30,
+        sdkSettings: { maxPendingEvents: 2, clientPoolSize: 1 },
+      })
+      const warn = sandbox.stub(winston, "warn")
+
+      // Several attachment slices, so the stream is genuinely waiting when it pauses.
+      const response = await stalledAction.validateAndExecute(identifyRequest(5000))
+      chai.expect(response.success).to.equal(true)
+      chai.expect(warn.calledWithMatch(
+        "[Rudder] delivery stalled: no delivery result for 30ms while paused; stopped streaming after",
+      )).to.equal(true)
     })
 
     it("does not stack timer flushes while a flush is still in flight", async () => {
