@@ -649,15 +649,14 @@ export class RudderAction extends Hub.Action {
     )
   }
 
-  protected routingKey(
-    userId: string | null | undefined,
-    anonymousId: string | null | undefined,
-  ): string {
-    if (userId) {
-      return userId
+  // Looker cell values are untyped, so IDs can arrive as numbers; they are
+  // stringified so every ID is actually hashed.
+  protected routingKey(userId: unknown, anonymousId: unknown): string {
+    if (userId !== null && userId !== undefined && userId !== "") {
+      return String(userId)
     }
-    if (anonymousId) {
-      return anonymousId
+    if (anonymousId !== null && anonymousId !== undefined && anonymousId !== "") {
+      return String(anonymousId)
     }
     return ""
   }

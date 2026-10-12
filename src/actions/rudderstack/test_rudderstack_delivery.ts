@@ -399,6 +399,47 @@ describe("RudderStack delivery", () => {
       chai.expect(createClient.called).to.equal(false)
     })
 
+    it("spreads numeric user ids across clients and keeps each on one client", async () => {
+      const clientIdsByUser = new Map<string, Set<number>>()
+      let clientId = 0
+      const action = new TestRudderIdentifyAction(() => {
+        const id = clientId++
+        return fakeRudderClient({
+          identify: (message: { userId?: unknown }, done: DeliveryCallback) => {
+            const userId = String(message.userId)
+            const ids = clientIdsByUser.get(userId)
+            if (ids) {
+              ids.add(id)
+            } else {
+              clientIdsByUser.set(userId, new Set([id]))
+            }
+            done()
+          },
+        })
+      })
+
+      const request = identifyRequest(0)
+      const data = []
+      for (let i = 0; i < 100; i++) {
+        data.push({ coolfield: { value: (i % 50) + 1 } })
+      }
+      request.attachment = {
+        dataBuffer: Buffer.from(JSON.stringify({
+          fields: { dimensions: [{ name: "coolfield", tags: ["user_id"] }] },
+          data,
+        })),
+      }
+
+      await action.validateAndExecute(request)
+      const clientsUsed = new Set<number>()
+      clientIdsByUser.forEach((ids) => {
+        chai.expect(ids.size).to.equal(1)
+        ids.forEach((id) => clientsUsed.add(id))
+      })
+      chai.expect(clientIdsByUser.size).to.equal(50)
+      chai.expect(clientsUsed.size).to.be.greaterThan(1)
+    })
+
     it("routes every event for a user to the same client", async () => {
       const clientIdsByUser = new Map<string, Set<number>>()
       let clientId = 0
