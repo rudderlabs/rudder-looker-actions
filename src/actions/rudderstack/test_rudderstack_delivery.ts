@@ -56,6 +56,8 @@ describe("RudderStack delivery", () => {
     const invalid: (string | undefined)[] = [
       undefined, "", "   ", "not a url", "ftp://dp.example.com", "/v1/batch",
       "http://dp.example.com", "http://dp.example.com/v1/batch",
+      "https://dp.example.com?x=1", "https://dp.example.com/v1/batch?x=1",
+      "https://dp.example.com#frag", "https://user:pass@dp.example.com",
     ]
     invalid.forEach((raw) => {
       it(`rejects ${JSON.stringify(raw)}`, () => {
@@ -110,19 +112,52 @@ describe("RudderStack delivery", () => {
       const warn = sinon.stub(winston, "warn")
       try {
         const settings = parseRudderSdkSettings({
-          RUDDER_SDK_FLUSH_AT: "5000",
+          RUDDER_SDK_FLUSH_AT: "1000",
           RUDDER_SDK_CLIENT_POOL_SIZE: "8",
         })
         chai.expect(settings.maxPendingEvents).to.equal(10000)
         chai.expect(warn.callCount).to.equal(1)
         chai.expect(warn.firstCall.args[0]).to.equal(
           "[Rudder] RUDDER_SDK_MAX_PENDING_EVENTS=1600 adjusted to 10000: " +
-            "below flushAt x clientPoolSize (40000); " +
+            "below flushAt x clientPoolSize (8000); " +
             "capped at 10000 to leave headroom below the SDK queue limit (20000)",
         )
       } finally {
         warn.restore()
       }
+    })
+
+    it("clamps the client pool size to its maximum", () => {
+      const warn = sinon.stub(winston, "warn")
+      try {
+        chai.expect(parseRudderSdkSettings({ RUDDER_SDK_CLIENT_POOL_SIZE: "4294967296" }).clientPoolSize)
+          .to.equal(32)
+        chai.expect(warn.calledWithMatch(
+          "[Rudder] RUDDER_SDK_CLIENT_POOL_SIZE=4294967296 is above the maximum 32, using 32",
+        )).to.equal(true)
+      } finally {
+        warn.restore()
+      }
+    })
+
+    it("clamps flushAt and the request timeout to their maximums", () => {
+      const settings = parseRudderSdkSettings({
+        RUDDER_SDK_FLUSH_AT: "50000",
+        RUDDER_SDK_REQUEST_TIMEOUT_MS: "3000000000",
+      })
+      chai.expect(settings.flushAt).to.equal(1000)
+      chai.expect(settings.requestTimeoutMs).to.equal(300000)
+    })
+
+    it("accepts settings exactly at their maximums", () => {
+      const settings = parseRudderSdkSettings({
+        RUDDER_SDK_FLUSH_AT: "1000",
+        RUDDER_SDK_CLIENT_POOL_SIZE: "32",
+        RUDDER_SDK_REQUEST_TIMEOUT_MS: "300000",
+      })
+      chai.expect(settings.flushAt).to.equal(1000)
+      chai.expect(settings.clientPoolSize).to.equal(32)
+      chai.expect(settings.requestTimeoutMs).to.equal(300000)
     })
 
     it("caps max pending events at half the SDK drop threshold", () => {

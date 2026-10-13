@@ -60,10 +60,19 @@ export const DEFAULT_RUDDER_SDK_SETTINGS: RudderSdkSettings = {
   requestTimeoutMs: 30000,
 }
 
+// Upper bounds for the other settings. The pool size bounds how many SDK clients
+// (each with its own queue, timers and sockets) are created per execute; the request
+// timeout must also stay within Node's timer range, and no request may outlast the
+// drain deadline.
+const MAX_FLUSH_AT = 1000
+const MAX_CLIENT_POOL_SIZE = 32
+const MAX_REQUEST_TIMEOUT_MS = DRAIN_TIMEOUT_MS
+
 function readPositiveInteger(
   env: NodeJS.ProcessEnv,
   name: string,
   fallback: number,
+  maximum: number,
 ): number {
   const raw = env[name]
   if (raw === undefined || raw.trim() === "") {
@@ -73,6 +82,10 @@ function readPositiveInteger(
   if (!Number.isInteger(value) || value <= 0) {
     winston.warn(`[Rudder] ignoring invalid ${name}="${raw}", using ${fallback}`)
     return fallback
+  }
+  if (value > maximum) {
+    winston.warn(`[Rudder] ${name}=${raw} is above the maximum ${maximum}, using ${maximum}`)
+    return maximum
   }
   return value
 }
@@ -88,16 +101,20 @@ export function parseRudderSdkSettings(
     env,
     "RUDDER_SDK_FLUSH_AT",
     DEFAULT_RUDDER_SDK_SETTINGS.flushAt,
+    MAX_FLUSH_AT,
   )
   const clientPoolSize = readPositiveInteger(
     env,
     "RUDDER_SDK_CLIENT_POOL_SIZE",
     DEFAULT_RUDDER_SDK_SETTINGS.clientPoolSize,
+    MAX_CLIENT_POOL_SIZE,
   )
+  // Not bounded here: the adjustments below cap it and log a single warning.
   let maxPendingEvents = readPositiveInteger(
     env,
     "RUDDER_SDK_MAX_PENDING_EVENTS",
     DEFAULT_RUDDER_SDK_SETTINGS.maxPendingEvents,
+    Number.MAX_SAFE_INTEGER,
   )
   const requestedMaxPendingEvents = maxPendingEvents
   const adjustmentReasons: string[] = []
@@ -129,6 +146,7 @@ export function parseRudderSdkSettings(
     env,
     "RUDDER_SDK_REQUEST_TIMEOUT_MS",
     DEFAULT_RUDDER_SDK_SETTINGS.requestTimeoutMs,
+    MAX_REQUEST_TIMEOUT_MS,
   )
   return { flushAt, clientPoolSize, maxPendingEvents, requestTimeoutMs }
 }
@@ -137,18 +155,13 @@ const RUDDER_SDK_SETTINGS = parseRudderSdkSettings(process.env)
 
 /**
  * Returns the data plane base URL the SDK expects. The SDK appends `/v1/batch`
- * itself, so a configured URL that already ends with it is trimmed.
+ * to the string it is given, so the result is rebuilt from the parsed origin and
+ * path, with a trailing `/v1/batch` removed.
  */
 export function normalizeDataPlaneUrl(raw: string | undefined): string {
-  let normalized = (raw === undefined ? "" : raw).trim().replace(/\/+$/, "")
-  if (normalized.endsWith(DATA_PLANE_BATCH_PATH)) {
-    normalized = normalized
-      .slice(0, -DATA_PLANE_BATCH_PATH.length)
-      .replace(/\/+$/, "")
-  }
   let parsed: URL
   try {
-    parsed = new URL(normalized)
+    parsed = new URL((raw === undefined ? "" : raw).trim())
   } catch (_e) {
     throw new RudderActionError(INVALID_DATA_PLANE_URL_MESSAGE)
   }
@@ -156,7 +169,16 @@ export function normalizeDataPlaneUrl(raw: string | undefined): string {
   if (parsed.protocol !== "https:") {
     throw new RudderActionError(INVALID_DATA_PLANE_URL_MESSAGE)
   }
-  return normalized
+  // A query, fragment or embedded credentials would sit in front of the path the
+  // SDK appends, so no usable endpoint can be built from them.
+  if (parsed.search !== "" || parsed.hash !== "" || parsed.username !== "" || parsed.password !== "") {
+    throw new RudderActionError(INVALID_DATA_PLANE_URL_MESSAGE)
+  }
+  let path = parsed.pathname.replace(/\/+$/, "")
+  if (path.endsWith(DATA_PLANE_BATCH_PATH)) {
+    path = path.slice(0, -DATA_PLANE_BATCH_PATH.length).replace(/\/+$/, "")
+  }
+  return `${parsed.origin}${path}`
 }
 
 /**
