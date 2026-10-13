@@ -425,6 +425,7 @@ export class RudderAction extends Hub.Action {
         errors.push(toError(e))
       }
     }
+    tracker.endStreaming()
 
     // Events already handed to the SDK are delivered (or fail) even if streaming
     // stopped early, so wait for every callback before responding, up to a limit.
@@ -442,7 +443,6 @@ export class RudderAction extends Hub.Action {
       }
     } finally {
       clearInterval(pendingFlushTimer)
-      tracker.stop()
     }
 
     winston.info("[Rudder] execute summary", {

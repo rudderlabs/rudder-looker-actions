@@ -94,9 +94,15 @@ export class RudderDeliveryTracker {
     })
   }
 
-  /** Clears the stall timer; call once the action is done with the tracker. */
-  stop() {
+  /**
+   * Detaches the stream once it has finished, failed or been aborted. The stall
+   * watchdog only guards a paused stream, so it must not fire during the final
+   * drain and abort a stream that was already fully read.
+   */
+  endStreaming() {
     this.clearStallTimer()
+    this.paused = false
+    this.flowControl = undefined
   }
 
   private settle() {

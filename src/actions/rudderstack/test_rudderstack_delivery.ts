@@ -217,7 +217,7 @@ describe("RudderStack delivery", () => {
         tracker.markSent()
       }
       chai.expect(control.pause.callCount).to.equal(1)
-      tracker.stop()
+      tracker.endStreaming()
     })
 
     it("counts failures and keeps the first error messages", () => {
@@ -251,6 +251,22 @@ describe("RudderStack delivery", () => {
       await new Promise((resolve) => setTimeout(resolve, 60))
       chai.expect(control.abort.calledOnce).to.equal(true)
       chai.expect(tracker.stalled).to.equal(true)
+    })
+
+    it("stops watching for a stall once streaming has ended", async () => {
+      const control = flowControlSpy()
+      const tracker = new RudderDeliveryTracker(2, 20)
+      tracker.setFlowControl(control)
+      tracker.markSent()
+      tracker.markSent()
+      tracker.endStreaming()
+
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      tracker.onEventDone()
+      tracker.onEventDone()
+      chai.expect(control.abort.called).to.equal(false)
+      chai.expect(control.resume.called).to.equal(false)
+      chai.expect(tracker.stalled).to.equal(false)
     })
 
     it("does not abort while delivery keeps progressing", async () => {
@@ -388,6 +404,26 @@ describe("RudderStack delivery", () => {
       chai.expect(warn.calledWithMatch(
         "[Rudder] delivery stalled: no delivery result for 30ms while paused; stopped streaming after",
       )).to.equal(true)
+    })
+
+    it("does not report a stall when the stream was fully read before pausing took effect", async () => {
+      // The stream pauses at the second row, but the third row is in the same slice,
+      // so parsing completes; the callbacks never arrive.
+      const action = new TestRudderIdentifyAction(() => fakeRudderClient(), {
+        drainTimeoutMs: 30,
+        sdkSettings: { maxPendingEvents: 2, clientPoolSize: 1 },
+      })
+      const info = sandbox.stub(winston, "info")
+      const warn = sandbox.stub(winston, "warn")
+
+      const response = await action.validateAndExecute(identifyRequest(3))
+      chai.expect(response.success).to.equal(true)
+      chai.expect(info.calledWithMatch(
+        "[Rudder] execute summary",
+        { rows: 3, sent: 3, unconfirmed: 3, streamStopped: false },
+      )).to.equal(true)
+      chai.expect(warn.calledWithMatch("[Rudder] delivery stalled")).to.equal(false)
+      chai.expect(warn.calledWithMatch("[Rudder] 3 of 3 events had no delivery result")).to.equal(true)
     })
 
     it("does not stack timer flushes while a flush is still in flight", async () => {
