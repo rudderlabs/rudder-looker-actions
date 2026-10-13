@@ -57,7 +57,7 @@ describe("RudderStack delivery", () => {
       undefined, "", "   ", "not a url", "ftp://dp.example.com", "/v1/batch",
       "http://dp.example.com", "http://dp.example.com/v1/batch",
       "https://dp.example.com?x=1", "https://dp.example.com/v1/batch?x=1",
-      "https://dp.example.com#frag", "https://user:pass@dp.example.com",
+      "https://dp.example.com#frag", "https://user@dp.example.com",
     ]
     invalid.forEach((raw) => {
       it(`rejects ${JSON.stringify(raw)}`, () => {
