@@ -418,6 +418,10 @@ export class ActionRequest {
               // oboe's failure report can quote the payload, which may contain user
               // data, so it is replaced with a generic error.
               winston.info(`[streamJsonDetail] oboe reports failure`, {...this.logInfo, rows})
+              // Stop reading, as the abort path does, so an unfinished download is
+              // cancelled rather than left open (or paused).
+              parser.abort()
+              readable.destroy()
               rejectParsed(new Error(JSON_DETAIL_PARSE_ERROR_MESSAGE))
             })
         })

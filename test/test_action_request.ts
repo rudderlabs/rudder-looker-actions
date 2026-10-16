@@ -291,6 +291,43 @@ describe("ActionRequest", () => {
       }
     })
 
+    it("cancels the download when its data fails to parse", async () => {
+      let markDownloadClosed: () => void = () => undefined
+      const downloadClosed = new Promise<void>((resolve) => { markDownloadClosed = resolve })
+      // Sends malformed JSON, then holds the response open.
+      const server = http.createServer((_req, res) => {
+        res.on("close", () => markDownloadClosed())
+        res.write('{"fields":{"dimensions":[]},"data":[}')
+      })
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+      try {
+        const address = server.address()
+        if (address === null || typeof address === "string") {
+          throw new Error("server has no port")
+        }
+        const request = new ActionRequest()
+        request.scheduledPlan = { downloadUrl: `http://127.0.0.1:${address.port}/` }
+
+        let rejected: unknown
+        try {
+          await request.streamJsonDetail({ onRow: () => undefined })
+        } catch (e) {
+          rejected = e
+        }
+        chai.expect((rejected instanceof Error) && rejected.message).to.equal(
+          "Failed to parse the json_detail data stream.",
+        )
+
+        const closedInTime = await Promise.race([
+          downloadClosed.then(() => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1000)),
+        ])
+        chai.expect(closedInTime).to.equal(true)
+      } finally {
+        server.close()
+      }
+    })
+
     it("rejects with the abort reason and stops delivering rows", async () => {
       let rows = 0
       let control: StreamFlowControl | undefined
