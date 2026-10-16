@@ -297,6 +297,9 @@ export class ActionRequest {
     return new Promise<void>((resolve, reject) => {
       let rows = 0
       this.stream(async (readable) => {
+        // Decode as UTF-8 here, so a multibyte character split across chunks is
+        // reassembled rather than turned into replacement characters.
+        readable.setEncoding("utf8")
         oboe(readable)
           .node("![*]", this.safeOboe(readable, reject, (row) => {
             rows++
@@ -348,11 +351,27 @@ export class ActionRequest {
     return new Promise<void>((resolve, reject) => {
       let rows = 0
       this.stream(async (readable) => {
-        // Resolve only once oboe has parsed the whole document. The stream can finish
-        // while parsed-but-undelivered data is still buffered (e.g. while paused), so
-        // waiting on the stream alone could resolve before every row reached onRow.
+        // Decode as UTF-8 here, so a multibyte character split across chunks is
+        // reassembled rather than turned into replacement characters.
+        readable.setEncoding("utf8")
+        // Resolve only once oboe has parsed the whole document and the stream has
+        // ended. The stream can finish while parsed-but-undelivered data is still
+        // buffered (e.g. while paused), so waiting on the stream alone could resolve
+        // before every row reached onRow; and oboe reports the root value done before
+        // it sees any invalid data after it, so waiting on that alone could miss it.
         await new Promise<void>((resolveParsed, rejectParsed) => {
           const parser = oboe(readable)
+          let rootParsed = false
+          let streamEnded = false
+          const resolveIfComplete = () => {
+            if (rootParsed && streamEnded) {
+              resolveParsed()
+            }
+          }
+          readable.on("end", () => {
+            streamEnded = true
+            resolveIfComplete()
+          })
           if (callbacks.onFlowControl) {
             callbacks.onFlowControl({
               pause: () => { readable.pause() },
@@ -382,7 +401,11 @@ export class ActionRequest {
             }))
             .done(() => {
               winston.info(`[streamJsonDetail] oboe reports done`, {...this.logInfo, rows})
-              resolveParsed()
+              rootParsed = true
+              // No rows can follow the root value, so a stream paused by the caller is
+              // resumed to read the rest and reach its end.
+              readable.resume()
+              resolveIfComplete()
             })
             .fail(() => {
               // oboe's failure report can quote the payload, which may contain user

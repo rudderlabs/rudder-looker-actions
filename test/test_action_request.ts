@@ -171,6 +171,82 @@ describe("ActionRequest", () => {
       )
     })
 
+    // Attachments are streamed in 64 KB slices (see ActionRequest.stream).
+    const sliceBytes = 64 * 1024
+
+    function attachmentRequest(body: string) {
+      const request = new ActionRequest()
+      request.attachment = { dataBuffer: Buffer.from(body) }
+      return request
+    }
+
+    // A value whose final "é" (2 bytes in UTF-8) straddles the first slice boundary.
+    function valueSplitAtSlice(prefix: string) {
+      return "a".repeat(sliceBytes - Buffer.byteLength(prefix) - 1) + "é"
+    }
+
+    it("decodes a multibyte character split across slices", async () => {
+      const prefix = '{"fields":{"dimensions":[]},"data":[{"f":{"value":"'
+      const value = valueSplitAtSlice(prefix)
+      const values: string[] = []
+      await attachmentRequest(`${prefix}${value}"}}]}`).streamJsonDetail({
+        onRow: (row) => { values.push(row.f.value) },
+      })
+      chai.expect(values).to.deep.equal([value])
+    })
+
+    it("decodes a multibyte character split across slices in the json format", async () => {
+      const prefix = '[{"f":"'
+      const value = valueSplitAtSlice(prefix)
+      const values: string[] = []
+      await attachmentRequest(`${prefix}${value}"}]`).streamJson((row) => { values.push(row.f) })
+      chai.expect(values).to.deep.equal([value])
+    })
+
+    async function parseError(request: ActionRequest) {
+      try {
+        await request.streamJsonDetail({ onRow: () => undefined })
+      } catch (e) {
+        return e
+      }
+      return undefined
+    }
+
+    it("rejects invalid data after the root value in the same chunk", async () => {
+      const rejected = await parseError(
+        attachmentRequest('{"fields":{"dimensions":[]},"data":[]}garbage'),
+      )
+      chai.expect((rejected instanceof Error) && rejected.message).to.equal(
+        "Failed to parse the json_detail data stream.",
+      )
+    })
+
+    it("rejects invalid data after the root value in a later chunk", async () => {
+      const root = '{"fields":{"dimensions":[]},"data":[]}'
+      const rejected = await parseError(
+        attachmentRequest(`${root}${" ".repeat(sliceBytes - root.length)}garbage`),
+      )
+      chai.expect((rejected instanceof Error) && rejected.message).to.equal(
+        "Failed to parse the json_detail data stream.",
+      )
+    })
+
+    it("finishes when the stream is paused at the last row", async () => {
+      let rows = 0
+      let control: StreamFlowControl | undefined
+      // Never resumed by the caller: the rest of the stream holds no rows.
+      await attachmentRequest('{"fields":{"dimensions":[]},"data":[{"f":{"value":1}}]}  ').streamJsonDetail({
+        onFlowControl: (flowControl) => { control = flowControl },
+        onRow: () => {
+          rows++
+          if (control) {
+            control.pause()
+          }
+        },
+      })
+      chai.expect(rows).to.equal(1)
+    })
+
     it("rejects with the abort reason and stops delivering rows", async () => {
       let rows = 0
       let control: StreamFlowControl | undefined
