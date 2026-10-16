@@ -1,4 +1,5 @@
 import * as chai from "chai"
+import * as http from "http"
 import * as semver from "semver"
 import {mockReq} from "sinon-express-mock"
 
@@ -245,6 +246,49 @@ describe("ActionRequest", () => {
         },
       })
       chai.expect(rows).to.equal(1)
+    })
+
+    it("cancels the download when the stream is aborted", async () => {
+      let markDownloadClosed: () => void = () => undefined
+      const downloadClosed = new Promise<void>((resolve) => { markDownloadClosed = resolve })
+      // Sends the first row, then holds the response open, like a large, slow download.
+      const server = http.createServer((_req, res) => {
+        res.on("close", () => markDownloadClosed())
+        res.write('{"fields":{"dimensions":[]},"data":[{"f":{"value":1}}')
+      })
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+      try {
+        const address = server.address()
+        if (address === null || typeof address === "string") {
+          throw new Error("server has no port")
+        }
+        const request = new ActionRequest()
+        request.scheduledPlan = { downloadUrl: `http://127.0.0.1:${address.port}/` }
+
+        let control: StreamFlowControl | undefined
+        let rejected: unknown
+        try {
+          await request.streamJsonDetail({
+            onFlowControl: (flowControl) => { control = flowControl },
+            onRow: () => {
+              if (control) {
+                control.abort(new Error("stalled"))
+              }
+            },
+          })
+        } catch (e) {
+          rejected = e
+        }
+        chai.expect((rejected instanceof Error) && rejected.message).to.equal("stalled")
+
+        const closedInTime = await Promise.race([
+          downloadClosed.then(() => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1000)),
+        ])
+        chai.expect(closedInTime).to.equal(true)
+      } finally {
+        server.close()
+      }
     })
 
     it("rejects with the abort reason and stops delivering rows", async () => {

@@ -207,8 +207,8 @@ export class ActionRequest {
       if (url) {
         winston.info(`[stream] beginning stream via download url`, this.logInfo)
         let hasResolved = false
-        httpRequest
-          .get(url, {timeout})
+        const download = httpRequest.get(url, {timeout})
+        download
           .on("error", (err) => {
             if (hasResolved && (err as any).code === "ECONNRESET") {
               winston.info(`[stream] ignoring ECONNRESET that occured after streaming finished`, this.logInfo)
@@ -251,6 +251,13 @@ export class ActionRequest {
           })
           .on("close", () => {
             winston.info(`[stream] PassThrough stream closed`, this.logInfo)
+            // Closed before the download finished: the consumer destroyed the stream
+            // (e.g. an action aborted it), so cancel the download to release its
+            // connection and buffers.
+            if (!hasResolved) {
+              winston.info(`[stream] cancelling download url request`, this.logInfo)
+              download.abort()
+            }
           })
       } else {
         if (this.attachment && this.attachment.dataBuffer) {
