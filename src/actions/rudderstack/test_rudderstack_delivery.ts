@@ -57,14 +57,20 @@ describe("RudderStack delivery", () => {
       })
     })
 
-    const invalid: (string | undefined)[] = [
-      undefined, "", "   ", "not a url", "ftp://dp.example.com", "/v1/batch",
-      "http://dp.example.com", "http://dp.example.com/v1/batch",
-    ]
-    invalid.forEach((raw) => {
-      it(`rejects ${JSON.stringify(raw)}`, () => {
+    const notUrls: (string | undefined)[] = [undefined, "", "   ", "not a url", "/v1/batch"]
+    notUrls.forEach((raw) => {
+      it(`rejects ${JSON.stringify(raw)} as not a URL`, () => {
         chai.expect(() => normalizeDataPlaneUrl(raw)).to.throw(
-          "Rudder Data Plane URL must be a valid https URL.",
+          "Rudder Data Plane URL validation failed: not a valid URL.",
+        )
+      })
+    })
+
+    const notHttps = ["ftp://dp.example.com", "http://dp.example.com", "http://dp.example.com/v1/batch"]
+    notHttps.forEach((raw) => {
+      it(`rejects ${JSON.stringify(raw)} as not https`, () => {
+        chai.expect(() => normalizeDataPlaneUrl(raw)).to.throw(
+          "Rudder Data Plane URL validation failed: must use https.",
         )
       })
     })
@@ -497,7 +503,7 @@ describe("RudderStack delivery", () => {
 
       const response = await action.validateAndExecute(identifyRequest(1, "ftp://dp.example.com"))
       chai.expect(response.success).to.equal(false)
-      chai.expect(response.message).to.equal("Rudder Data Plane URL must be a valid https URL.")
+      chai.expect(response.message).to.equal("Rudder Data Plane URL validation failed: must use https.")
       chai.expect(createClient.called).to.equal(false)
     })
 

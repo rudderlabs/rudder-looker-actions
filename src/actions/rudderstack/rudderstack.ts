@@ -11,8 +11,10 @@ import {
 import { RudderActionError } from "./rudderstack_error"
 
 const DATA_PLANE_BATCH_PATH = "/v1/batch"
-const INVALID_DATA_PLANE_URL_MESSAGE =
-  "Rudder Data Plane URL must be a valid https URL."
+const DATA_PLANE_URL_NOT_A_URL_MESSAGE =
+  "Rudder Data Plane URL validation failed: not a valid URL."
+const DATA_PLANE_URL_NOT_HTTPS_MESSAGE =
+  "Rudder Data Plane URL validation failed: must use https."
 // Backstop for waiting on delivery callbacks once streaming has ended. Requests
 // already time out on their own; this guarantees the action always responds.
 const DRAIN_TIMEOUT_MS = 5 * 60 * 1000
@@ -214,11 +216,11 @@ export function normalizeDataPlaneUrl(raw: string | undefined): string {
   try {
     parsed = new URL((raw === undefined ? "" : raw).trim())
   } catch (_e) {
-    throw new RudderActionError(INVALID_DATA_PLANE_URL_MESSAGE)
+    throw new RudderActionError(DATA_PLANE_URL_NOT_A_URL_MESSAGE)
   }
   // The write key travels as Basic auth on every request, so plain http is refused.
   if (parsed.protocol !== "https:") {
-    throw new RudderActionError(INVALID_DATA_PLANE_URL_MESSAGE)
+    throw new RudderActionError(DATA_PLANE_URL_NOT_HTTPS_MESSAGE)
   }
   let path = parsed.pathname.replace(/\/+$/, "")
   if (path.endsWith(DATA_PLANE_BATCH_PATH)) {
