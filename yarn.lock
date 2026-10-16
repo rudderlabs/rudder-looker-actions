@@ -537,10 +537,10 @@
   resolved "https://registry.yarnpkg.com/@protobufjs/utf8/-/utf8-1.1.1.tgz#eaee5900122c110a3dbcb728c0597014a2621774"
   integrity sha512-oOAWABowe8EAbMyWKM0tYDKi8Yaox52D+HWZhAIJqQXbqe0xI/GV7FhLWqlEKreMkfDjshR5FKgi3mnle0h6Eg==
 
-"@rudderstack/rudder-sdk-node@3.0.14":
-  version "3.0.14"
-  resolved "https://registry.yarnpkg.com/@rudderstack/rudder-sdk-node/-/rudder-sdk-node-3.0.14.tgz#e1ada43cd89a8cbe6c5b5e8d276c7a8ebcb62e68"
-  integrity sha512-QfA1VbLlVXMLj13jBxgL7BtU8/DxKLY0PoEsT0mYlUZnCkoQhQh1Jjo9kv+0bnura1jXCVLI6vxaV/jue9TZ5w==
+"@rudderstack/rudder-sdk-node@3.0.16":
+  version "3.0.16"
+  resolved "https://registry.yarnpkg.com/@rudderstack/rudder-sdk-node/-/rudder-sdk-node-3.0.16.tgz#7992f335d9c94d527b72b542f2e1ea58cfb14495"
+  integrity sha512-iTdP4Ifut637pt/xFSEKBLQtZ/4lR3fW9bze5tB8N4TYqml6VQP/5dnuE5v7OY7MOTquVCyO9ryIdFCEsC8e1Q==
   dependencies:
     axios "^1.20.0"
     axios-retry "4.5.0"

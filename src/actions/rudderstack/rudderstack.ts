@@ -13,26 +13,13 @@ import { RudderActionError } from "./rudderstack_error"
 const DATA_PLANE_BATCH_PATH = "/v1/batch"
 const INVALID_DATA_PLANE_URL_MESSAGE =
   "Rudder Data Plane URL must be a valid https URL."
-// The SDK silently drops events once this many are queued in a single client.
-const SDK_MAX_INTERNAL_QUEUE_SIZE = 20000
-// Upper bound for RUDDER_SDK_MAX_PENDING_EVENTS. Pausing the stream takes effect
-// between chunks, so rows already parsed from the current chunk (at most ~64 KB,
-// i.e. a few thousand of the smallest possible rows) still arrive after a pause.
-// Keeping the limit at half the SDK's drop threshold leaves room for that overshoot
-// even with a single client.
-const MAX_PENDING_EVENTS_CAP = SDK_MAX_INTERNAL_QUEUE_SIZE / 2
-// While events are pending, queued events are flushed at this interval so batches
-// smaller than flushAt don't wait for the SDK's own 10s flush timer.
-const PENDING_FLUSH_INTERVAL_MS = 500
-// Hash modulus for client routing; keeps the running hash within safe integers.
-const ROUTING_HASH_MODULUS = 2147483647
 // Backstop for waiting on delivery callbacks once streaming has ended. Requests
 // already time out on their own; this guarantees the action always responds.
 const DRAIN_TIMEOUT_MS = 5 * 60 * 1000
 
 // The SDK reads `timeout` (ms, per request) at runtime, but its type declarations
 // omit it.
-interface RudderClientOptions extends Analytics.constructorOptions {
+export interface RudderClientOptions extends Analytics.constructorOptions {
   timeout?: number
 }
 
@@ -48,24 +35,33 @@ export interface RudderClient {
 
 export interface RudderSdkSettings {
   flushAt: number
-  clientPoolSize: number
+  maxBatchBytes: number
+  maxInternalQueueSize: number
   maxPendingEvents: number
+  flushIntervalMs: number
   requestTimeoutMs: number
 }
 
+// The SDK sends one batch request at a time, so throughput comes from batch size:
+// flushAt is set high enough that maxBatchBytes, not the event count, ends a batch.
 export const DEFAULT_RUDDER_SDK_SETTINGS: RudderSdkSettings = {
-  flushAt: 100,
-  clientPoolSize: 8,
-  maxPendingEvents: 1600,
+  flushAt: 10000,
+  // 3.5 MiB
+  maxBatchBytes: 3670016,
+  maxInternalQueueSize: 50000,
+  maxPendingEvents: 20000,
+  flushIntervalMs: 500,
   requestTimeoutMs: 30000,
 }
 
-// Upper bounds for the other settings. The pool size bounds how many SDK clients
-// (each with its own queue, timers and sockets) are created per execute; the request
-// timeout must also stay within Node's timer range, and no request may outlast the
-// drain deadline.
-const MAX_FLUSH_AT = 1000
-const MAX_CLIENT_POOL_SIZE = 32
+// Upper bounds for the settings. The data plane rejects request bodies over 4,000 KB
+// (Gateway.maxReqSizeInKB), so batches stay below that. The SDK holds up to
+// maxInternalQueueSize events in memory. The request timeout must also stay within
+// Node's timer range, and no request may outlast the drain deadline.
+const MAX_FLUSH_AT = 20000
+const MAX_BATCH_BYTES = 3900000
+const MAX_INTERNAL_QUEUE_SIZE = 200000
+const MAX_FLUSH_INTERVAL_MS = 10000
 const MAX_REQUEST_TIMEOUT_MS = DRAIN_TIMEOUT_MS
 
 function readPositiveInteger(
@@ -103,11 +99,17 @@ export function parseRudderSdkSettings(
     DEFAULT_RUDDER_SDK_SETTINGS.flushAt,
     MAX_FLUSH_AT,
   )
-  const clientPoolSize = readPositiveInteger(
+  const maxBatchBytes = readPositiveInteger(
     env,
-    "RUDDER_SDK_CLIENT_POOL_SIZE",
-    DEFAULT_RUDDER_SDK_SETTINGS.clientPoolSize,
-    MAX_CLIENT_POOL_SIZE,
+    "RUDDER_SDK_MAX_BATCH_BYTES",
+    DEFAULT_RUDDER_SDK_SETTINGS.maxBatchBytes,
+    MAX_BATCH_BYTES,
+  )
+  const maxInternalQueueSize = readPositiveInteger(
+    env,
+    "RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE",
+    DEFAULT_RUDDER_SDK_SETTINGS.maxInternalQueueSize,
+    MAX_INTERNAL_QUEUE_SIZE,
   )
   // Not bounded here: the adjustments below cap it and log a single warning.
   let maxPendingEvents = readPositiveInteger(
@@ -118,22 +120,23 @@ export function parseRudderSdkSettings(
   )
   const requestedMaxPendingEvents = maxPendingEvents
   const adjustmentReasons: string[] = []
-  // Each client should be able to fill a batch before the stream pauses.
-  const fullBatchesPending = flushAt * clientPoolSize
-  if (maxPendingEvents < fullBatchesPending) {
-    maxPendingEvents = fullBatchesPending * 2
-    adjustmentReasons.push(
-      `below flushAt x clientPoolSize (${fullBatchesPending})`,
-    )
+  // A full batch should be able to build up while the previous one is in flight.
+  const twoBatches = flushAt * 2
+  if (maxPendingEvents < twoBatches) {
+    maxPendingEvents = twoBatches
+    adjustmentReasons.push(`below 2 x flushAt (${twoBatches})`)
   }
-  // A client's queue only holds pending events, so keeping the total pending (plus
-  // the post-pause overshoot) below the SDK's silent-drop threshold guarantees no
-  // client ever drops an event without calling its callback.
-  if (maxPendingEvents > MAX_PENDING_EVENTS_CAP) {
-    maxPendingEvents = MAX_PENDING_EVENTS_CAP
+  // The SDK queue only holds pending events, so keeping the total pending below half
+  // the SDK's silent-drop threshold guarantees no event is dropped without its
+  // callback. The other half covers the overshoot after a pause: pausing takes effect
+  // between chunks, so rows already parsed from the current chunk (at most ~64 KB,
+  // i.e. a few thousand of the smallest possible rows) still arrive.
+  const maxPendingEventsCap = Math.floor(maxInternalQueueSize / 2)
+  if (maxPendingEvents > maxPendingEventsCap) {
+    maxPendingEvents = maxPendingEventsCap
     adjustmentReasons.push(
-      `capped at ${MAX_PENDING_EVENTS_CAP} to leave headroom below ` +
-        `the SDK queue limit (${SDK_MAX_INTERNAL_QUEUE_SIZE})`,
+      `capped at ${maxPendingEventsCap} to leave headroom below ` +
+        `the SDK queue limit (${maxInternalQueueSize})`,
     )
   }
   if (adjustmentReasons.length > 0) {
@@ -142,13 +145,50 @@ export function parseRudderSdkSettings(
         `${maxPendingEvents}: ${adjustmentReasons.join("; ")}`,
     )
   }
+  const flushIntervalMs = readPositiveInteger(
+    env,
+    "RUDDER_SDK_FLUSH_INTERVAL_MS",
+    DEFAULT_RUDDER_SDK_SETTINGS.flushIntervalMs,
+    MAX_FLUSH_INTERVAL_MS,
+  )
   const requestTimeoutMs = readPositiveInteger(
     env,
     "RUDDER_SDK_REQUEST_TIMEOUT_MS",
     DEFAULT_RUDDER_SDK_SETTINGS.requestTimeoutMs,
     MAX_REQUEST_TIMEOUT_MS,
   )
-  return { flushAt, clientPoolSize, maxPendingEvents, requestTimeoutMs }
+  return {
+    flushAt,
+    maxBatchBytes,
+    maxInternalQueueSize,
+    maxPendingEvents,
+    flushIntervalMs,
+    requestTimeoutMs,
+  }
+}
+
+/** SDK client options for the given settings. */
+export function rudderClientOptions(
+  dataPlaneUrl: string,
+  settings: RudderSdkSettings,
+): RudderClientOptions {
+  return {
+    dataPlaneUrl,
+    flushAt: settings.flushAt,
+    maxQueueSize: settings.maxBatchBytes,
+    maxInternalQueueSize: settings.maxInternalQueueSize,
+    // A partial batch is sent at most this long after its first event is queued.
+    flushInterval: settings.flushIntervalMs,
+    // Without a timeout a stalled connection never settles, so its events never
+    // get a delivery callback.
+    timeout: settings.requestTimeoutMs,
+    // Failures are counted through each event's callback; this logs each failed batch.
+    errorHandler: (error: unknown) => {
+      winston.warn(
+        `[Rudder] batch delivery failed: ${describeDeliveryError(error)}`,
+      )
+    },
+  }
 }
 
 const RUDDER_SDK_SETTINGS = parseRudderSdkSettings(process.env)
@@ -156,7 +196,8 @@ const RUDDER_SDK_SETTINGS = parseRudderSdkSettings(process.env)
 /**
  * Returns the data plane base URL the SDK expects. The SDK appends `/v1/batch`
  * to the string it is given, so the result is rebuilt from the parsed origin and
- * path, with a trailing `/v1/batch` removed.
+ * path, with a trailing `/v1/batch` removed. Any query, fragment or credentials
+ * are dropped.
  */
 export function normalizeDataPlaneUrl(raw: string | undefined): string {
   let parsed: URL
@@ -169,30 +210,11 @@ export function normalizeDataPlaneUrl(raw: string | undefined): string {
   if (parsed.protocol !== "https:") {
     throw new RudderActionError(INVALID_DATA_PLANE_URL_MESSAGE)
   }
-  // A query, fragment or embedded credentials would sit in front of the path the
-  // SDK appends, so no usable endpoint can be built from them.
-  if (parsed.search !== "" || parsed.hash !== "" || parsed.username !== "" || parsed.password !== "") {
-    throw new RudderActionError(INVALID_DATA_PLANE_URL_MESSAGE)
-  }
   let path = parsed.pathname.replace(/\/+$/, "")
   if (path.endsWith(DATA_PLANE_BATCH_PATH)) {
     path = path.slice(0, -DATA_PLANE_BATCH_PATH.length).replace(/\/+$/, "")
   }
   return `${parsed.origin}${path}`
-}
-
-/**
- * Picks the pool client for an event. The same routing key always maps to the
- * same client, so one user's events go through one client's queue, as they did
- * with a single client. Arrival order is not guaranteed: a client can have
- * several batches in flight at once.
- */
-export function pickClientIndex(routingKey: string, poolSize: number): number {
-  let hash = 5381
-  for (let i = 0; i < routingKey.length; i++) {
-    hash = (hash * 33 + routingKey.charCodeAt(i)) % ROUTING_HASH_MODULUS
-  }
-  return hash % poolSize
 }
 
 /**
@@ -306,10 +328,7 @@ export class RudderAction extends Hub.Action {
       return this.buildResponse([toError(e)])
     }
 
-    const clients = Array.from(
-      { length: this.sdkSettings.clientPoolSize },
-      () => this.createRudderClient(writeKey, dataPlaneUrl),
-    )
+    const client = this.createRudderClient(writeKey, dataPlaneUrl)
     // A stream paused with no delivery progress for the drain timeout is aborted.
     const tracker = new RudderDeliveryTracker(
       this.sdkSettings.maxPendingEvents,
@@ -341,20 +360,6 @@ export class RudderAction extends Hub.Action {
 
     const startedAt = Date.now()
     let totalRows = 0
-    // Skips a tick while the previous timer flush is still waiting on a slow
-    // request, so ticks don't pile up flush calls that all fire at once.
-    let flushInProgress = false
-    const pendingFlushTimer = setInterval(async () => {
-      if (flushInProgress || tracker.pending === 0) {
-        return
-      }
-      flushInProgress = true
-      try {
-        await this.flushClients(clients)
-      } finally {
-        flushInProgress = false
-      }
-    }, PENDING_FLUSH_INTERVAL_MS)
 
     try {
       await request.streamJsonDetail({
@@ -395,13 +400,6 @@ export class RudderAction extends Hub.Action {
           if (!payload.event) {
             delete payload.event
           }
-          const client =
-            clients[
-              pickClientIndex(
-                this.routingKey(payload.userId, payload.anonymousId),
-                clients.length,
-              )
-            ]
           tracker.markSent()
           try {
             client[rudderCall](payload, tracker.onEventDone)
@@ -429,21 +427,15 @@ export class RudderAction extends Hub.Action {
 
     // Events already handed to the SDK are delivered (or fail) even if streaming
     // stopped early, so wait for every callback before responding, up to a limit.
-    let unconfirmed = 0
-    try {
-      // One deadline covers both the final flush and the wait for callbacks, so a
-      // slow or stuck flush can't push the response past the drain timeout.
-      const deadline = Date.now() + this.drainTimeoutMs
-      await settlesWithin(this.flushClients(clients), this.drainTimeoutMs)
-      const drained = await tracker.waitForDrain(
-        Math.max(0, deadline - Date.now()),
-      )
-      if (!drained) {
-        unconfirmed = tracker.pending
-      }
-    } finally {
-      clearInterval(pendingFlushTimer)
-    }
+    // One deadline covers both the final flush and the wait for callbacks, so a slow
+    // or stuck flush can't push the response past the drain timeout. flush() doesn't
+    // reject: failed batches are reported through their events' callbacks.
+    const deadline = Date.now() + this.drainTimeoutMs
+    await settlesWithin(client.flush(), this.drainTimeoutMs)
+    const drained = await tracker.waitForDrain(
+      Math.max(0, deadline - Date.now()),
+    )
+    const unconfirmed = drained ? 0 : tracker.pending
 
     winston.info("[Rudder] execute summary", {
       webhookId: request.webhookId,
@@ -644,43 +636,7 @@ export class RudderAction extends Hub.Action {
     writeKey: string,
     dataPlaneUrl: string,
   ): RudderClient {
-    const options: RudderClientOptions = {
-      dataPlaneUrl,
-      flushAt: this.sdkSettings.flushAt,
-      // Without a timeout a stalled connection never settles, so its events never
-      // get a delivery callback.
-      timeout: this.sdkSettings.requestTimeoutMs,
-      // Failures are counted through each event's callback. Without a handler the
-      // SDK rethrows them from flush() as unhandled rejections, crashing the process.
-      errorHandler: (error: unknown) => {
-        winston.warn(
-          `[Rudder] batch delivery failed: ${describeDeliveryError(error)}`,
-        )
-      },
-    }
-    return new Analytics(writeKey, options)
-  }
-
-  protected async flushClients(clients: RudderClient[]) {
-    await Promise.all(
-      clients.map((client) =>
-        client.flush().catch((error: unknown) => {
-          winston.warn(`[Rudder] flush failed: ${describeDeliveryError(error)}`)
-        }),
-      ),
-    )
-  }
-
-  // Looker cell values are untyped, so IDs can arrive as numbers; they are
-  // stringified so every ID is actually hashed.
-  protected routingKey(userId: unknown, anonymousId: unknown): string {
-    if (userId !== null && userId !== undefined && userId !== "") {
-      return String(userId)
-    }
-    if (anonymousId !== null && anonymousId !== undefined && anonymousId !== "") {
-      return String(anonymousId)
-    }
-    return ""
+    return new Analytics(writeKey, rudderClientOptions(dataPlaneUrl, this.sdkSettings))
   }
 
   protected generateAnonymousId() {

@@ -8,7 +8,7 @@ import {
   DeliveryCallback,
   normalizeDataPlaneUrl,
   parseRudderSdkSettings,
-  pickClientIndex,
+  rudderClientOptions,
 } from "./rudderstack"
 import { RudderDeliveryTracker } from "./rudderstack_delivery_tracker"
 import { ackingRudderClient, fakeRudderClient, TestRudderIdentifyAction } from "./test_rudderstack_helpers"
@@ -46,6 +46,10 @@ describe("RudderStack delivery", () => {
       ["  https://dp.example.com/v1/batch  ", "https://dp.example.com"],
       ["https://localhost:8080//v1/batch", "https://localhost:8080"],
       ["https://dp.example.com/prefix/v1/batch", "https://dp.example.com/prefix"],
+      ["https://dp.example.com?x=1", "https://dp.example.com"],
+      ["https://dp.example.com/v1/batch?x=1", "https://dp.example.com"],
+      ["https://dp.example.com#frag", "https://dp.example.com"],
+      ["https://user@dp.example.com/v1/batch", "https://dp.example.com"],
     ]
     cases.forEach(([raw, expected]) => {
       it(`normalizes "${raw}"`, () => {
@@ -56,8 +60,6 @@ describe("RudderStack delivery", () => {
     const invalid: (string | undefined)[] = [
       undefined, "", "   ", "not a url", "ftp://dp.example.com", "/v1/batch",
       "http://dp.example.com", "http://dp.example.com/v1/batch",
-      "https://dp.example.com?x=1", "https://dp.example.com/v1/batch?x=1",
-      "https://dp.example.com#frag", "https://user@dp.example.com",
     ]
     invalid.forEach((raw) => {
       it(`rejects ${JSON.stringify(raw)}`, () => {
@@ -75,11 +77,20 @@ describe("RudderStack delivery", () => {
 
     it("reads valid overrides", () => {
       chai.expect(parseRudderSdkSettings({
-        RUDDER_SDK_FLUSH_AT: "50",
-        RUDDER_SDK_CLIENT_POOL_SIZE: "4",
-        RUDDER_SDK_MAX_PENDING_EVENTS: "1000",
+        RUDDER_SDK_FLUSH_AT: "500",
+        RUDDER_SDK_MAX_BATCH_BYTES: "1048576",
+        RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE: "8000",
+        RUDDER_SDK_MAX_PENDING_EVENTS: "3000",
+        RUDDER_SDK_FLUSH_INTERVAL_MS: "1000",
         RUDDER_SDK_REQUEST_TIMEOUT_MS: "10000",
-      })).to.deep.equal({ flushAt: 50, clientPoolSize: 4, maxPendingEvents: 1000, requestTimeoutMs: 10000 })
+      })).to.deep.equal({
+        flushAt: 500,
+        maxBatchBytes: 1048576,
+        maxInternalQueueSize: 8000,
+        maxPendingEvents: 3000,
+        flushIntervalMs: 1000,
+        requestTimeoutMs: 10000,
+      })
     })
 
     it("falls back to the default request timeout for an invalid value", () => {
@@ -90,8 +101,10 @@ describe("RudderStack delivery", () => {
     it("falls back to defaults for invalid values", () => {
       chai.expect(parseRudderSdkSettings({
         RUDDER_SDK_FLUSH_AT: "abc",
-        RUDDER_SDK_CLIENT_POOL_SIZE: "0",
+        RUDDER_SDK_MAX_BATCH_BYTES: "0",
+        RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE: "lots",
         RUDDER_SDK_MAX_PENDING_EVENTS: "-5",
+        RUDDER_SDK_FLUSH_INTERVAL_MS: "",
       })).to.deep.equal(DEFAULT_RUDDER_SDK_SETTINGS)
     })
 
@@ -100,95 +113,115 @@ describe("RudderStack delivery", () => {
         .to.equal(DEFAULT_RUDDER_SDK_SETTINGS.flushAt)
     })
 
-    it("raises max pending events so every client can fill a batch", () => {
+    it("raises max pending events so a batch can fill while another is in flight", () => {
       chai.expect(parseRudderSdkSettings({
-        RUDDER_SDK_FLUSH_AT: "100",
-        RUDDER_SDK_CLIENT_POOL_SIZE: "8",
-        RUDDER_SDK_MAX_PENDING_EVENTS: "500",
-      }).maxPendingEvents).to.equal(1600)
+        RUDDER_SDK_FLUSH_AT: "5000",
+        RUDDER_SDK_MAX_PENDING_EVENTS: "4000",
+      }).maxPendingEvents).to.equal(10000)
     })
 
     it("logs one warning with the value actually used when both adjustments apply", () => {
       const warn = sinon.stub(winston, "warn")
       try {
         const settings = parseRudderSdkSettings({
-          RUDDER_SDK_FLUSH_AT: "1000",
-          RUDDER_SDK_CLIENT_POOL_SIZE: "8",
+          RUDDER_SDK_FLUSH_AT: "20000",
+          RUDDER_SDK_MAX_PENDING_EVENTS: "1000",
         })
-        chai.expect(settings.maxPendingEvents).to.equal(10000)
+        chai.expect(settings.maxPendingEvents).to.equal(25000)
         chai.expect(warn.callCount).to.equal(1)
         chai.expect(warn.firstCall.args[0]).to.equal(
-          "[Rudder] RUDDER_SDK_MAX_PENDING_EVENTS=1600 adjusted to 10000: " +
-            "below flushAt x clientPoolSize (8000); " +
-            "capped at 10000 to leave headroom below the SDK queue limit (20000)",
+          "[Rudder] RUDDER_SDK_MAX_PENDING_EVENTS=1000 adjusted to 25000: " +
+            "below 2 x flushAt (40000); " +
+            "capped at 25000 to leave headroom below the SDK queue limit (50000)",
         )
       } finally {
         warn.restore()
       }
     })
 
-    it("clamps the client pool size to its maximum", () => {
+    it("clamps settings to their maximums", () => {
       const warn = sinon.stub(winston, "warn")
       try {
-        chai.expect(parseRudderSdkSettings({ RUDDER_SDK_CLIENT_POOL_SIZE: "4294967296" }).clientPoolSize)
-          .to.equal(32)
+        const settings = parseRudderSdkSettings({
+          RUDDER_SDK_FLUSH_AT: "50000",
+          RUDDER_SDK_MAX_BATCH_BYTES: "4194304",
+          RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE: "4294967296",
+          RUDDER_SDK_FLUSH_INTERVAL_MS: "60000",
+          RUDDER_SDK_REQUEST_TIMEOUT_MS: "3000000000",
+        })
+        chai.expect(settings.flushAt).to.equal(20000)
+        chai.expect(settings.maxBatchBytes).to.equal(3900000)
+        chai.expect(settings.maxInternalQueueSize).to.equal(200000)
+        chai.expect(settings.flushIntervalMs).to.equal(10000)
+        chai.expect(settings.requestTimeoutMs).to.equal(300000)
         chai.expect(warn.calledWithMatch(
-          "[Rudder] RUDDER_SDK_CLIENT_POOL_SIZE=4294967296 is above the maximum 32, using 32",
+          "[Rudder] RUDDER_SDK_MAX_BATCH_BYTES=4194304 is above the maximum 3900000, using 3900000",
         )).to.equal(true)
       } finally {
         warn.restore()
       }
     })
 
-    it("clamps flushAt and the request timeout to their maximums", () => {
-      const settings = parseRudderSdkSettings({
-        RUDDER_SDK_FLUSH_AT: "50000",
-        RUDDER_SDK_REQUEST_TIMEOUT_MS: "3000000000",
-      })
-      chai.expect(settings.flushAt).to.equal(1000)
-      chai.expect(settings.requestTimeoutMs).to.equal(300000)
-    })
-
     it("accepts settings exactly at their maximums", () => {
       const settings = parseRudderSdkSettings({
-        RUDDER_SDK_FLUSH_AT: "1000",
-        RUDDER_SDK_CLIENT_POOL_SIZE: "32",
+        RUDDER_SDK_FLUSH_AT: "20000",
+        RUDDER_SDK_MAX_BATCH_BYTES: "3900000",
+        RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE: "200000",
+        RUDDER_SDK_FLUSH_INTERVAL_MS: "10000",
         RUDDER_SDK_REQUEST_TIMEOUT_MS: "300000",
       })
-      chai.expect(settings.flushAt).to.equal(1000)
-      chai.expect(settings.clientPoolSize).to.equal(32)
+      chai.expect(settings.flushAt).to.equal(20000)
+      chai.expect(settings.maxBatchBytes).to.equal(3900000)
+      chai.expect(settings.maxInternalQueueSize).to.equal(200000)
+      chai.expect(settings.flushIntervalMs).to.equal(10000)
       chai.expect(settings.requestTimeoutMs).to.equal(300000)
     })
 
     it("caps max pending events at half the SDK drop threshold", () => {
-      chai.expect(parseRudderSdkSettings({ RUDDER_SDK_MAX_PENDING_EVENTS: "15000" }).maxPendingEvents)
-        .to.equal(10000)
+      chai.expect(parseRudderSdkSettings({ RUDDER_SDK_MAX_PENDING_EVENTS: "30000" }).maxPendingEvents)
+        .to.equal(25000)
+    })
+
+    it("derives the max pending events cap from the configured SDK queue size", () => {
+      chai.expect(parseRudderSdkSettings({
+        RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE: "100000",
+        RUDDER_SDK_MAX_PENDING_EVENTS: "60000",
+      }).maxPendingEvents).to.equal(50000)
     })
 
     it("accepts max pending events at the cap", () => {
-      chai.expect(parseRudderSdkSettings({ RUDDER_SDK_MAX_PENDING_EVENTS: "10000" }).maxPendingEvents)
-        .to.equal(10000)
+      chai.expect(parseRudderSdkSettings({ RUDDER_SDK_MAX_PENDING_EVENTS: "25000" }).maxPendingEvents)
+        .to.equal(25000)
     })
   })
 
-  describe("pickClientIndex", () => {
-    it("routes the same key to the same client", () => {
-      chai.expect(pickClientIndex("user-42", 8)).to.equal(pickClientIndex("user-42", 8))
+  describe("rudderClientOptions", () => {
+    it("passes every setting to the SDK", () => {
+      const options = rudderClientOptions("https://dp.example.com", DEFAULT_RUDDER_SDK_SETTINGS)
+      chai.expect(options).to.include({
+        dataPlaneUrl: "https://dp.example.com",
+        flushAt: 10000,
+        maxQueueSize: 3670016,
+        maxInternalQueueSize: 50000,
+        flushInterval: 500,
+        timeout: 30000,
+      })
     })
 
-    it("always returns an index within the pool", () => {
-      for (let i = 0; i < 1000; i++) {
-        const index = pickClientIndex(`user-${i}`, 8)
-        chai.expect(index).to.be.within(0, 7)
+    it("logs failed batches through the error handler", () => {
+      const warn = sinon.stub(winston, "warn")
+      try {
+        const options = rudderClientOptions("https://dp.example.com", DEFAULT_RUDDER_SDK_SETTINGS)
+        chai.expect(options.errorHandler).to.be.a("function")
+        if (options.errorHandler) {
+          options.errorHandler(new Error("Request failed with status code 502"))
+        }
+        chai.expect(warn.calledWithExactly(
+          "[Rudder] batch delivery failed: Request failed with status code 502",
+        )).to.equal(true)
+      } finally {
+        warn.restore()
       }
-    })
-
-    it("spreads keys across the pool", () => {
-      const used = new Set<number>()
-      for (let i = 0; i < 1000; i++) {
-        used.add(pickClientIndex(`user-${i}`, 8))
-      }
-      chai.expect(used.size).to.equal(8)
     })
   })
 
@@ -394,7 +427,7 @@ describe("RudderStack delivery", () => {
       // Calls are accepted but never acknowledged, and the stream pauses after 2 events.
       const stalledAction = new TestRudderIdentifyAction(() => fakeRudderClient(), {
         drainTimeoutMs: 30,
-        sdkSettings: { maxPendingEvents: 2, clientPoolSize: 1 },
+        sdkSettings: { maxPendingEvents: 2 },
       })
       const warn = sandbox.stub(winston, "warn")
 
@@ -411,7 +444,7 @@ describe("RudderStack delivery", () => {
       // so parsing completes; the callbacks never arrive.
       const action = new TestRudderIdentifyAction(() => fakeRudderClient(), {
         drainTimeoutMs: 30,
-        sdkSettings: { maxPendingEvents: 2, clientPoolSize: 1 },
+        sdkSettings: { maxPendingEvents: 2 },
       })
       const info = sandbox.stub(winston, "info")
       const warn = sandbox.stub(winston, "warn")
@@ -426,38 +459,22 @@ describe("RudderStack delivery", () => {
       chai.expect(warn.calledWithMatch("[Rudder] 3 of 3 events had no delivery result")).to.equal(true)
     })
 
-    it("does not stack timer flushes while a flush is still in flight", async () => {
-      let releaseFlush: () => void = () => undefined
-      const flushHeld = new Promise<void>((resolve) => { releaseFlush = resolve })
-      const pendingCallbacks: DeliveryCallback[] = []
-      const flush = sandbox.spy(async () => flushHeld)
-      const action = new TestRudderIdentifyAction(() => fakeRudderClient({
-        identify: (_message: unknown, done: DeliveryCallback) => {
-          pendingCallbacks.push(done)
-        },
-        flush,
-      }))
+    it("flushes the client once after streaming and leaves partial batches to the SDK timer", async () => {
+      const flush = sandbox.spy(async () => Promise.resolve())
+      const action = new TestRudderIdentifyAction(() => ackingRudderClient({ flush }))
 
-      const execution = action.validateAndExecute(identifyRequest(1))
-      // Several 500ms ticks pass while the first flush is held open.
-      await new Promise((resolve) => setTimeout(resolve, 1200))
-      const poolSize = DEFAULT_RUDDER_SDK_SETTINGS.clientPoolSize
-      // One post-stream drain flush per client plus at most one timer flush per client.
-      chai.expect(flush.callCount).to.be.at.most(poolSize * 2)
-
-      releaseFlush()
-      pendingCallbacks.forEach((done) => done())
-      const response = await execution
+      const response = await action.validateAndExecute(identifyRequest(3))
       chai.expect(response.success).to.equal(true)
+      chai.expect(flush.callCount).to.equal(1)
     })
 
-    it("creates clients with the normalized data plane URL", async () => {
+    it("creates one client with the normalized data plane URL", async () => {
       const createClient = sandbox.spy(() => ackingRudderClient())
       const action = new TestRudderIdentifyAction(createClient)
 
       await action.validateAndExecute(identifyRequest(1, "https://dp.example.com/v1/batch/"))
-      chai.expect(createClient.callCount).to.equal(DEFAULT_RUDDER_SDK_SETTINGS.clientPoolSize)
-      chai.expect(createClient.alwaysCalledWithExactly("mykey", "https://dp.example.com")).to.equal(true)
+      chai.expect(createClient.callCount).to.equal(1)
+      chai.expect(createClient.calledWithExactly("mykey", "https://dp.example.com")).to.equal(true)
     })
 
     it("fails without sending when the data plane URL is invalid", async () => {
@@ -470,81 +487,18 @@ describe("RudderStack delivery", () => {
       chai.expect(createClient.called).to.equal(false)
     })
 
-    it("spreads numeric user ids across clients and keeps each on one client", async () => {
-      const clientIdsByUser = new Map<string, Set<number>>()
-      let clientId = 0
-      const action = new TestRudderIdentifyAction(() => {
-        const id = clientId++
-        return fakeRudderClient({
-          identify: (message: { userId?: unknown }, done: DeliveryCallback) => {
-            const userId = String(message.userId)
-            const ids = clientIdsByUser.get(userId)
-            if (ids) {
-              ids.add(id)
-            } else {
-              clientIdsByUser.set(userId, new Set([id]))
-            }
-            done()
-          },
-        })
-      })
+    it("sends every row through the one client, in row order", async () => {
+      const userIds: unknown[] = []
+      const action = new TestRudderIdentifyAction(() => fakeRudderClient({
+        identify: (message: { userId?: unknown }, done: DeliveryCallback) => {
+          userIds.push(message.userId)
+          done()
+        },
+      }))
 
-      const request = identifyRequest(0)
-      const data = []
-      for (let i = 0; i < 100; i++) {
-        data.push({ coolfield: { value: (i % 50) + 1 } })
-      }
-      request.attachment = {
-        dataBuffer: Buffer.from(JSON.stringify({
-          fields: { dimensions: [{ name: "coolfield", tags: ["user_id"] }] },
-          data,
-        })),
-      }
-
-      await action.validateAndExecute(request)
-      const clientsUsed = new Set<number>()
-      clientIdsByUser.forEach((ids) => {
-        chai.expect(ids.size).to.equal(1)
-        ids.forEach((id) => clientsUsed.add(id))
-      })
-      chai.expect(clientIdsByUser.size).to.equal(50)
-      chai.expect(clientsUsed.size).to.be.greaterThan(1)
-    })
-
-    it("routes every event for a user to the same client", async () => {
-      const clientIdsByUser = new Map<string, Set<number>>()
-      let clientId = 0
-      const action = new TestRudderIdentifyAction(() => {
-        const id = clientId++
-        return fakeRudderClient({
-          identify: (message: { userId?: string }, done: DeliveryCallback) => {
-            const userId = message.userId === undefined ? "" : message.userId
-            const ids = clientIdsByUser.get(userId)
-            if (ids) {
-              ids.add(id)
-            } else {
-              clientIdsByUser.set(userId, new Set([id]))
-            }
-            done()
-          },
-        })
-      })
-
-      const request = identifyRequest(0)
-      const data = []
-      for (let i = 0; i < 50; i++) {
-        data.push({ coolfield: { value: `user${i % 5}` } })
-      }
-      request.attachment = {
-        dataBuffer: Buffer.from(JSON.stringify({
-          fields: { dimensions: [{ name: "coolfield", tags: ["user_id"] }] },
-          data,
-        })),
-      }
-
-      await action.validateAndExecute(request)
-      chai.expect(clientIdsByUser.size).to.equal(5)
-      clientIdsByUser.forEach((ids) => chai.expect(ids.size).to.equal(1))
+      const response = await action.validateAndExecute(identifyRequest(50))
+      chai.expect(response.success).to.equal(true)
+      chai.expect(userIds).to.deep.equal(Array.from({ length: 50 }, (_v, i) => `user${i}`))
     })
   })
 })
