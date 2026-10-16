@@ -79,14 +79,14 @@ describe("RudderStack delivery", () => {
       chai.expect(parseRudderSdkSettings({
         RUDDER_SDK_FLUSH_AT: "500",
         RUDDER_SDK_MAX_BATCH_BYTES: "1048576",
-        RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE: "8000",
+        RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE: "12000",
         RUDDER_SDK_MAX_PENDING_EVENTS: "3000",
         RUDDER_SDK_FLUSH_INTERVAL_MS: "1000",
         RUDDER_SDK_REQUEST_TIMEOUT_MS: "10000",
       })).to.deep.equal({
         flushAt: 500,
         maxBatchBytes: 1048576,
-        maxInternalQueueSize: 8000,
+        maxInternalQueueSize: 12000,
         maxPendingEvents: 3000,
         flushIntervalMs: 1000,
         requestTimeoutMs: 10000,
@@ -187,6 +187,20 @@ describe("RudderStack delivery", () => {
         RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE: "100000",
         RUDDER_SDK_MAX_PENDING_EVENTS: "60000",
       }).maxPendingEvents).to.equal(50000)
+    })
+
+    it("raises the SDK queue size to its minimum and caps pending events at half of it", () => {
+      const warn = sinon.stub(winston, "warn")
+      try {
+        const settings = parseRudderSdkSettings({ RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE: "1000" })
+        chai.expect(settings.maxInternalQueueSize).to.equal(10000)
+        chai.expect(settings.maxPendingEvents).to.equal(5000)
+        chai.expect(warn.calledWithMatch(
+          "[Rudder] RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE=1000 is below the minimum 10000, using 10000",
+        )).to.equal(true)
+      } finally {
+        warn.restore()
+      }
     })
 
     it("accepts max pending events at the cap", () => {
@@ -486,6 +500,62 @@ describe("RudderStack delivery", () => {
       chai.expect(response.message).to.equal("Rudder Data Plane URL must be a valid https URL.")
       chai.expect(createClient.called).to.equal(false)
     })
+
+    it("never overflows the SDK queue with a small configured queue and compact rows", async () => {
+      const warn = sandbox.stub(winston, "warn")
+      // A queue of 1,000 is raised to the minimum; the pending limit follows it.
+      const sdkSettings = parseRudderSdkSettings({ RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE: "1000" })
+      chai.expect(warn.called).to.equal(true)
+      // Like the SDK, the fake client drops events beyond its queue size without a
+      // callback. It delivers queued events in batches, a little later.
+      const queue: DeliveryCallback[] = []
+      let dropped = 0
+      let peakQueue = 0
+      let delivering = false
+      const deliverBatch = () => {
+        queue.splice(0, 1000).forEach((callback) => callback())
+        if (queue.length > 0) {
+          setTimeout(deliverBatch, 1)
+        } else {
+          delivering = false
+        }
+      }
+      const enqueue = (_message: unknown, done: DeliveryCallback) => {
+        if (queue.length >= sdkSettings.maxInternalQueueSize) {
+          dropped++
+          return
+        }
+        queue.push(done)
+        peakQueue = Math.max(peakQueue, queue.length)
+        if (!delivering) {
+          delivering = true
+          setTimeout(deliverBatch, 1)
+        }
+      }
+      const action = new TestRudderIdentifyAction(
+        () => fakeRudderClient({ identify: enqueue }),
+        // Dropped events never get a callback; a short drain lets the test report them.
+        { sdkSettings, drainTimeoutMs: 1000 },
+      )
+
+      // Rows of ~20 bytes, so one 64 KB slice holds several thousand.
+      const request = identifyRequest(0)
+      const data = []
+      for (let i = 0; i < 30000; i++) {
+        data.push({ f: { value: i } })
+      }
+      request.attachment = {
+        dataBuffer: Buffer.from(JSON.stringify({
+          fields: { dimensions: [{ name: "f", tags: ["user_id"] }] },
+          data,
+        })),
+      }
+
+      const response = await action.validateAndExecute(request)
+      chai.expect(response.success).to.equal(true)
+      chai.expect(dropped).to.equal(0)
+      chai.expect(peakQueue).to.be.at.most(sdkSettings.maxInternalQueueSize)
+    }).timeout(10000)
 
     it("sends every row through the one client, in row order", async () => {
       const userIds: unknown[] = []

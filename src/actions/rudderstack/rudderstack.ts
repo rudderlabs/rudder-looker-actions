@@ -63,12 +63,18 @@ const MAX_BATCH_BYTES = 3900000
 const MAX_INTERNAL_QUEUE_SIZE = 200000
 const MAX_FLUSH_INTERVAL_MS = 10000
 const MAX_REQUEST_TIMEOUT_MS = DRAIN_TIMEOUT_MS
+// Pausing the stream takes effect between chunks of at most 64 KB, and the smallest
+// possible row (`{"a":{"value":1}},`) is 18 bytes, so up to ~3,700 rows still arrive
+// after a pause. The pending limit is at most half the queue, so a queue of at least
+// this size leaves room for that overshoot.
+const MIN_INTERNAL_QUEUE_SIZE = 10000
 
 function readPositiveInteger(
   env: NodeJS.ProcessEnv,
   name: string,
   fallback: number,
   maximum: number,
+  minimum = 1,
 ): number {
   const raw = env[name]
   if (raw === undefined || raw.trim() === "") {
@@ -82,6 +88,10 @@ function readPositiveInteger(
   if (value > maximum) {
     winston.warn(`[Rudder] ${name}=${raw} is above the maximum ${maximum}, using ${maximum}`)
     return maximum
+  }
+  if (value < minimum) {
+    winston.warn(`[Rudder] ${name}=${raw} is below the minimum ${minimum}, using ${minimum}`)
+    return minimum
   }
   return value
 }
@@ -110,6 +120,7 @@ export function parseRudderSdkSettings(
     "RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE",
     DEFAULT_RUDDER_SDK_SETTINGS.maxInternalQueueSize,
     MAX_INTERNAL_QUEUE_SIZE,
+    MIN_INTERNAL_QUEUE_SIZE,
   )
   // Not bounded here: the adjustments below cap it and log a single warning.
   let maxPendingEvents = readPositiveInteger(
@@ -128,9 +139,8 @@ export function parseRudderSdkSettings(
   }
   // The SDK queue only holds pending events, so keeping the total pending below half
   // the SDK's silent-drop threshold guarantees no event is dropped without its
-  // callback. The other half covers the overshoot after a pause: pausing takes effect
-  // between chunks, so rows already parsed from the current chunk (at most ~64 KB,
-  // i.e. a few thousand of the smallest possible rows) still arrive.
+  // callback. The other half covers the rows that still arrive after a pause (see
+  // MIN_INTERNAL_QUEUE_SIZE).
   const maxPendingEventsCap = Math.floor(maxInternalQueueSize / 2)
   if (maxPendingEvents > maxPendingEventsCap) {
     maxPendingEvents = maxPendingEventsCap
