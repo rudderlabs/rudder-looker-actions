@@ -24,7 +24,10 @@ froms=""
 for img in $images; do
   case "$img" in
     node|*/node|node@*|*/node@*) fail "Dockerfile: FROM $img has no version tag" ;;
-    node:*|*/node:*) v=${img#*node:}; froms="$froms ${v%%[-@]*}" ;;
+    node:*|*/node:*)
+      v=${img##*/}; v=${v#node:}; v=${v%%[-@]*}
+      [ -n "$v" ] || { fail "Dockerfile: FROM $img has no version"; v=none; }
+      froms="$froms $v" ;;
   esac
 done
 [ -n "$froms" ] || fail "Dockerfile: no 'FROM node:<version>' line"
