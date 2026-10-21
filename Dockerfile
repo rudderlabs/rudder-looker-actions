@@ -3,7 +3,7 @@
 
 # The Node version must match .nvmrc. scripts/check-node-version.sh checks both files.
 FROM node:24.22.1-alpine3.24@sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d AS base
-# apk upgrade pulls the current ca-certificates bundle into the image.
+# Node uses its bundled root store. apk upgrade patches the OS packages and the system CA bundle for other tools.
 RUN apk --no-cache upgrade && apk --no-cache add tini
 # The build fails when the base image runs another Node version than .nvmrc.
 COPY .nvmrc /tmp/.nvmrc

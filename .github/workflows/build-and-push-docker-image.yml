@@ -211,3 +211,13 @@ jobs:
 
       - name: Smoke-test the image (Node version and trust store)
         run: scripts/image-smoke.sh action-hub:smoke
+
+      # The server must boot on this image: ts-node compiles src/boot.ts as uid 1000.
+      - name: Boot the server and call GET /
+        run: |
+          set -euo pipefail
+          docker run -d --name action-hub-smoke -p 127.0.0.1:8080:8080 -e ACTION_HUB_BASE_URL=http://localhost:8080 \
+            -e ACTION_HUB_LABEL=smoke -e ACTION_HUB_SECRET=smoke action-hub:smoke
+          for _ in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:8080/ && break; sleep 2; done
+          docker logs action-hub-smoke 2>&1 | tail -20
+          curl -sf -o /dev/null http://127.0.0.1:8080/

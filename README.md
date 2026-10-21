@@ -48,7 +48,7 @@ Most users should use our official action hub cloud service running on (https://
 
 - `.nvmrc`
 - the `FROM node:<version>-alpine<alpine>@sha256:<index digest>` line in `Dockerfile`
-- `engines.node` and `devEngines.runtime.version` in `package.json`
+- the lower bound of `engines.node` (`>=<version> <major+1>`) and `devEngines.runtime.version` in `package.json`
 
 Dependabot bumps the `FROM` line with no cooldown. It does not touch the other files, so its PR fails CI until you update them on the same branch.
 

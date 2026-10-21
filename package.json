@@ -112,7 +112,7 @@
   },
   "typings": "lib/index",
   "engines": {
-    "node": "24.22.1",
+    "node": ">=24.22.1 <25",
     "yarn": ">=1.19.1"
   },
   "resolutions": {
