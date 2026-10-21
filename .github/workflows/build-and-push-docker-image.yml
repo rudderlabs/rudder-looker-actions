@@ -227,6 +227,6 @@ jobs:
             sleep 2
           done
           [ "$up" = true ] || { docker logs hub; exit 1; }
-          key=$(docker exec hub node ./node_modules/ts-node/dist/bin.js ./bin/generate_key.ts | sed -n 2p)
+          key=$(docker exec hub node ./node_modules/ts-node/dist/bin.js ./bin/generate_key.ts | grep -Ex '[0-9a-f]{64}/[0-9a-f]{128}')
           curl -sf --max-time 30 -X POST -H "Authorization: Token token=\"$key\"" http://127.0.0.1:8080/ \
             | jq -e '.integrations | type == "array" and length > 0' || { docker logs hub; exit 1; }

@@ -6,18 +6,27 @@ cd "$(dirname "$0")/.."
 
 # One line, with an optional trailing newline or CRLF and nothing else.
 want=$(tr -d '\r' < .nvmrc)
-printf '%s' "$want" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo ".nvmrc must hold one exact version such as 24.22.1, got '$want'" >&2; exit 1; }
+bad_nvmrc() { echo ".nvmrc must hold one exact version such as 24.22.1, got '$want'" >&2; exit 1; }
+case "$want" in ''|*[!0-9.]*|.*|*.|*..*|0[0-9]*|*.0[0-9]*) bad_nvmrc ;; esac
+[ "$(printf '%s' "$want" | tr -cd . | wc -c)" -eq 2 ] || bad_nvmrc
 major=${want%%.*}
 range=">=$want <$((major + 1))"
 
 status=0
 fail() { echo "$1" >&2; status=1; }
 
-# Every FROM line that names a node image, in any case and with any separator.
+# The image field of every FROM instruction: the first word after FROM that is not a --flag.
 # A line continuation in a FROM instruction is not supported and fails.
+[ -f Dockerfile ] || { echo "Dockerfile not found" >&2; exit 1; }
 grep -Eiq '^[[:space:]]*FROM[[:space:]].*\\$' Dockerfile && fail "Dockerfile: a FROM line continues on the next line"
-grep -Ei '^[[:space:]]*FROM[[:space:]]' Dockerfile | grep -Eiq '(^|[[:space:]/])node([[:space:]@]|$)' && fail "Dockerfile: a FROM node line has no version tag"
-froms=$(grep -Ei '^[[:space:]]*FROM[[:space:]]' Dockerfile | grep -Eio '(^|[[:space:]/])node:[^[:space:]]*' | sed -E 's#^[[:space:]/]*##; s#^[Nn][Oo][Dd][Ee]:##; s#[-@].*##') || true
+images=$(awk 'toupper($1) == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; break } }' Dockerfile)
+froms=""
+for img in $images; do
+  case "$img" in
+    node|*/node|node@*|*/node@*) fail "Dockerfile: FROM $img has no version tag" ;;
+    node:*|*/node:*) v=${img#*node:}; froms="$froms ${v%%[-@]*}" ;;
+  esac
+done
 [ -n "$froms" ] || fail "Dockerfile: no 'FROM node:<version>' line"
 for v in $froms; do
   [ "$v" = "$want" ] || fail "Dockerfile FROM node:$v, .nvmrc is $want"
