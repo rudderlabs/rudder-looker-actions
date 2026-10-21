@@ -72,7 +72,7 @@ runs:
 
     - name: Build and Push Image to ECR
       if: ${{ inputs.can_publish == 'true' }}
-      uses: rudderlabs/build-scan-push-action@865b4253caa57f8f20cd109e0efc1affe3a64939 # v2.2.0
+      uses: rudderlabs/build-scan-push-action@8b0c8fa6e6d526c296bc1de587abb8ed2ee6e903 # v2.3.0
       with:
         context: .
         push: true
@@ -94,7 +94,7 @@ runs:
     # the Dockerfile still builds.
     # TODO: Remove the Docker Hub push once we have migrated to ECR.
     - name: Build and Push Image to DockerHub
-      uses: rudderlabs/build-scan-push-action@865b4253caa57f8f20cd109e0efc1affe3a64939 # v2.2.0
+      uses: rudderlabs/build-scan-push-action@8b0c8fa6e6d526c296bc1de587abb8ed2ee6e903 # v2.3.0
       with:
         context: .
         push: ${{ inputs.can_publish == 'true' }}

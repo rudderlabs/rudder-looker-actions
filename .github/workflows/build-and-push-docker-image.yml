@@ -11,8 +11,11 @@ name: build and push image pr
 on:
   pull_request:
 
-permissions:
-  contents: read
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   # A branch name is not a valid Docker tag: "chore/foo" contains a slash.
@@ -24,13 +27,14 @@ jobs:
   get-image-tag:
     name: Compute image tag
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read # minimum required permission for job execution
     outputs:
       img_tag: ${{ steps.tag.outputs.img_tag }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -75,6 +79,7 @@ jobs:
             arch: amd64
             platform: linux/amd64
     runs-on: ${{ matrix.build-config.os }}
+    timeout-minutes: 60
     env:
       # Fork PRs get neither secrets nor an OIDC token under `pull_request`, so
       # they build only. Same-repo PRs publish to both registries. A boolean
@@ -82,7 +87,7 @@ jobs:
       CAN_PUBLISH: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -115,6 +120,7 @@ jobs:
   create-manifest-ecr:
     name: Create multi-arch manifest for ECR
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [build-images]
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     permissions:
@@ -122,7 +128,7 @@ jobs:
       contents: read # to checkout repository code (actions/checkout)
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -146,13 +152,14 @@ jobs:
   create-manifest-dockerhub:
     name: Create multi-arch manifest for DockerHub
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [get-image-tag, build-images]
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     permissions:
       contents: read # to checkout repository code (actions/checkout)
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -169,3 +176,37 @@ jobs:
           image_tag: rudderstack/action-hub:${{ needs.get-image-tag.outputs.img_tag }}
           dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  # Builds the image on GitHub-hosted runners and runs it: the image must run
+  # the Node version in .nvmrc and reject the eMudhra test chains. Fork PRs run
+  # it too, since it needs no secrets.
+  image-smoke:
+    name: Smoke-test the image (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm
+            platform: linux/arm64
+          - os: ubuntu-latest
+            platform: linux/amd64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read # actions/checkout
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+
+      - name: Check out repository code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the image
+        run: docker build -t action-hub:smoke .
+
+      - name: Smoke-test the image (Node version and trust store)
+        run: scripts/image-smoke.sh action-hub:smoke
