@@ -84,7 +84,8 @@ jobs:
       # Fork PRs get neither secrets nor an OIDC token under `pull_request`, so
       # they build only. Same-repo PRs publish to both registries. A boolean
       # expression casts to the string 'true' or 'false'.
-      CAN_PUBLISH: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+      # Dependabot PRs get no Actions secrets either, so they build only too.
+      CAN_PUBLISH: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
@@ -116,13 +117,13 @@ jobs:
           dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # Fork PRs pushed nothing, so there are no per-arch images to stitch.
+  # Fork and Dependabot PRs pushed nothing, so there are no per-arch images to stitch.
   create-manifest-ecr:
     name: Create multi-arch manifest for ECR
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [build-images]
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
     permissions:
       id-token: write # to request the OIDC JWT for AWS (configure-aws-credentials)
       contents: read # to checkout repository code (actions/checkout)
@@ -148,13 +149,13 @@ jobs:
           role_session_name: ${{ github.event.repository.name }}-manifest
 
   # TODO: Remove this once we have migrated to ECR.
-  # Fork PRs pushed nothing, so there are no per-arch images to stitch.
+  # Fork and Dependabot PRs pushed nothing, so there are no per-arch images to stitch.
   create-manifest-dockerhub:
     name: Create multi-arch manifest for DockerHub
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [get-image-tag, build-images]
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
     permissions:
       contents: read # to checkout repository code (actions/checkout)
     steps:

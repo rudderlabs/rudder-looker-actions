@@ -26,6 +26,8 @@ FROM base AS runtime
 COPY --from=deps /code/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY public ./public
+# bin/generate_key.ts makes the API key: yarn generate-api-key.
+COPY bin ./bin
 COPY --from=build /code/src ./src
 EXPOSE 8080
 ENTRYPOINT ["/sbin/tini", "--"]

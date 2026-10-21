@@ -9,4 +9,5 @@
 !tsconfig.json
 !tsconfig.npm.json
 !src/
+!bin/
 !public/

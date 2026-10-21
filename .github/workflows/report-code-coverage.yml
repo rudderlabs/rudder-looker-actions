@@ -7,7 +7,8 @@ on:
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A fixed prefix: under workflow_call, github.workflow names the caller.
+  group: coverage-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
