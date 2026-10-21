@@ -1,13 +1,34 @@
-FROM node:20-alpine@sha256:1ab6fc5a31d515dc7b6b25f6acfda2001821f2c2400252b6cb61044bd9f9ad48
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+# check=error=true
 
-RUN mkdir -p /code
+# The Node version must match .nvmrc. scripts/check-node-version.sh checks both files.
+FROM node:24.22.1-alpine3.24@sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d AS base
+# apk upgrade pulls the current ca-certificates bundle into the image.
+RUN apk --no-cache upgrade && apk --no-cache add tini
+# The build fails when the base image runs another Node version than .nvmrc.
+COPY .nvmrc /tmp/.nvmrc
+RUN test "$(node --version)" = "v$(tr -d '[:space:]' < /tmp/.nvmrc)" \
+    || { echo "node $(node --version) does not match .nvmrc $(cat /tmp/.nvmrc)" >&2; exit 1; }
 WORKDIR /code
 
-COPY . /code
+FROM base AS deps
+COPY package.json yarn.lock .yarnrc .npmrc ./
+COPY .yarn ./.yarn
+RUN yarn install --frozen-lockfile --production && yarn cache clean
 
-RUN yarn install --production && yarn cache clean
+# The server runs from src through ts-node. This stage only proves that the sources compile.
+FROM deps AS build
+COPY tsconfig.json tsconfig.npm.json ./
+COPY src ./src
 RUN yarn build
 
-CMD ["yarn","start"]
-
+FROM base AS runtime
+COPY --from=deps /code/node_modules ./node_modules
+COPY package.json tsconfig.json ./
+COPY public ./public
+COPY --from=build /code/src ./src
 EXPOSE 8080
+ENTRYPOINT ["/sbin/tini", "--"]
+# The node user (uid 1000) ships with the official image. The app files stay root-owned and read-only to it.
+USER 1000:1000
+CMD ["node", "./node_modules/ts-node/dist/bin.js", "./src/boot.ts"]
