@@ -220,10 +220,13 @@ jobs:
           set -euo pipefail
           docker run -d --name hub -p 127.0.0.1:8080:8080 -e ACTION_HUB_BASE_URL=http://localhost:8080 \
             -e ACTION_HUB_LABEL=smoke -e ACTION_HUB_SECRET=smoke action-hub:smoke
+          up=false
           for _ in $(seq 1 90); do
-            [ "$(docker inspect -f '{{.State.Running}}' hub)" = true ] || { docker logs hub; exit 1; }
-            curl -sf --max-time 5 -o /dev/null http://127.0.0.1:8080/ && break; sleep 2
+            [ "$(docker inspect -f '{{.State.Running}}' hub)" = true ] || break
+            curl -sf --max-time 5 -o /dev/null http://127.0.0.1:8080/ && { up=true; break; }
+            sleep 2
           done
+          [ "$up" = true ] || { docker logs hub; exit 1; }
           key=$(docker exec hub node ./node_modules/ts-node/dist/bin.js ./bin/generate_key.ts | sed -n 2p)
           curl -sf --max-time 30 -X POST -H "Authorization: Token token=\"$key\"" http://127.0.0.1:8080/ \
-            | jq -e '.integrations | length > 0' || { docker logs hub; exit 1; }
+            | jq -e '.integrations | type == "array" and length > 0' || { docker logs hub; exit 1; }
