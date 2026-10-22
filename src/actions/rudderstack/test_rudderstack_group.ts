@@ -2,18 +2,17 @@ import * as chai from "chai"
 import * as sinon from "sinon"
 
 import * as Hub from "../../hub"
+import { DeliveryCallback } from "./rudderstack"
 import { RudderGroupAction } from "./rudderstack_group"
+import { TestRudderGroupAction } from "./test_rudderstack_group_action"
+import { fakeRudderClient } from "./test_rudderstack_helpers"
 
 const action = new RudderGroupAction()
 action.executeInOwnProcess = false
 
-function expectRudderMatch(request: Hub.ActionRequest, match: any) {
-  const groupSpy = sinon.spy()
-  const stubClient = sinon.stub(action as any, "rudderClientFromRequest")
-    .callsFake(() => {
-      return { group: groupSpy, flush: (cb: () => void) => cb()}
-     })
-  const stubAnon = sinon.stub(action as any, "generateAnonymousId").callsFake(() => "stubanon")
+function expectRudderMatch(request: Hub.ActionRequest, match: object) {
+  const groupSpy = sinon.spy((_message: unknown, done: DeliveryCallback) => done())
+  const testAction = new TestRudderGroupAction(() => fakeRudderClient({ group: groupSpy }))
 
   const now = new Date()
   const clock = sinon.useFakeTimers(now.getTime())
@@ -30,10 +29,8 @@ function expectRudderMatch(request: Hub.ActionRequest, match: any) {
   }
   const merged = {...baseMatch, ...match}
 
-  return chai.expect(action.validateAndExecute(request)).to.be.fulfilled.then(() => {
-    chai.expect(groupSpy).to.have.been.calledWithExactly(merged)
-    stubClient.restore()
-    stubAnon.restore()
+  return chai.expect(testAction.validateAndExecute(request)).to.be.fulfilled.then(() => {
+    chai.expect(groupSpy).to.have.been.calledWithExactly(merged, sinon.match.func)
     clock.restore()
   })
 }
@@ -46,7 +43,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       const request = new Hub.ActionRequest()
       request.type = Hub.ActionType.Query
       request.params = {
-        rudder_write_key: "mykey", rudder_server_url: "http://localhost:8080",
+        rudder_write_key: "mykey", rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{ name: "coolfield", tags: ["rudder_group_id"]}]},
@@ -63,7 +60,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       const request = new Hub.ActionRequest()
       request.type = Hub.ActionType.Query
       request.params = {
-        rudder_write_key: "mykey", rudder_server_url: "http://localhost:8080",
+        rudder_write_key: "mykey", rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{ name: "coolfield", tags: ["rudder_group_id"]}, {name: "coolid", tags: ["user_id"]}]},
@@ -80,7 +77,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       const request = new Hub.ActionRequest()
       request.type = Hub.ActionType.Query
       request.params = {
-        rudder_write_key: "mykey", rudder_server_url: "http://localhost:8080",
+        rudder_write_key: "mykey", rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [
@@ -113,7 +110,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       const request = new Hub.ActionRequest()
       request.type = Hub.ActionType.Query
       request.params = {
-        rudder_write_key: "mykey", rudder_server_url: "http://localhost:8080",
+        rudder_write_key: "mykey", rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [
@@ -133,7 +130,7 @@ describe(`${action.constructor.name} unit tests`, () => {
       const request = new Hub.ActionRequest()
       request.type = Hub.ActionType.Query
       request.params = {
-        rudder_write_key: "mykey", rudder_server_url: "http://localhost:8080",
+        rudder_write_key: "mykey", rudder_server_url: "https://localhost:8080",
       }
       request.attachment = {dataBuffer: Buffer.from(JSON.stringify({
         fields: {dimensions: [{ name: "coolfield", tags: ["rudder_group_id"]}, {name: "coolid", tags: ["user_id"]}]},
