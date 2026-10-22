@@ -179,9 +179,8 @@ jobs:
           dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # Builds the image on GitHub-hosted runners and boots it. The Dockerfile
-  # checks the Node version and the CA bundle. Fork PRs run it too, since it
-  # needs no secrets.
+  # Builds the image on GitHub-hosted runners and boots it. Fork PRs run it
+  # too, since it needs no secrets.
   image-boot:
     name: Boot the image (${{ matrix.platform }})
     strategy:

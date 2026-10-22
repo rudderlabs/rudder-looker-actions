@@ -1,6 +1,5 @@
 # Allowlist: the build context holds only what the Dockerfile copies.
 *
-!.nvmrc
 !.npmrc
 !.yarnrc
 !.yarn/releases/
