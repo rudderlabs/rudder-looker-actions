@@ -58,4 +58,4 @@ Check the four places with one command:
 scripts/check-node-version.sh
 ```
 
-The image build also fails when the base image runs another Node version than `.nvmrc`. `scripts/image-smoke.sh <image>` runs a built image and checks its Node version and trust store.
+The image build also fails when the base image runs another Node version than `.nvmrc`. It also fails when the installed CA bundle is older than 20261020-r0.

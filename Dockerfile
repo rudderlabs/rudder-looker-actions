@@ -5,6 +5,14 @@
 FROM node:24.22.1-alpine3.24@sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d AS base
 # Node uses its bundled root store. apk upgrade patches the OS packages and the system CA bundle for other tools.
 RUN apk --no-cache upgrade && apk --no-cache add tini
+# The build fails when the installed CA bundle is older than 20261020-r0. It reads the installed package, not the repository index.
+RUN set -eu; \
+    installed="$(apk info -v)"; \
+    bundle="$(printf '%s\n' "$installed" | sed -n 's/^ca-certificates-bundle-\([0-9]\{8\}-r[0-9][0-9]*\)$/\1/p')"; \
+    test -n "$bundle"; \
+    cmp="$(apk version -t "$bundle" 20261020-r0)"; \
+    case "$cmp" in "="|">") ;; *) echo "ca-certificates-bundle '$bundle' is older than 20261020-r0" >&2; exit 1 ;; esac
+
 # The build fails when the base image runs another Node version than .nvmrc.
 COPY .nvmrc /tmp/.nvmrc
 RUN test "$(node --version)" = "v$(tr -d '[:space:]' < /tmp/.nvmrc)" \

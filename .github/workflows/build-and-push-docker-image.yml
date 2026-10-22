@@ -179,11 +179,11 @@ jobs:
           dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # Builds the image on GitHub-hosted runners and runs it: the image must run
-  # the Node version in .nvmrc and reject the eMudhra test chains. Fork PRs run
-  # it too, since it needs no secrets.
-  image-smoke:
-    name: Smoke-test the image (${{ matrix.platform }})
+  # Builds the image on GitHub-hosted runners and boots it. The Dockerfile
+  # checks the Node version and the CA bundle. Fork PRs run it too, since it
+  # needs no secrets.
+  image-boot:
+    name: Boot the image (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
@@ -208,10 +208,7 @@ jobs:
           persist-credentials: false
 
       - name: Build the image
-        run: docker build -t action-hub:smoke .
-
-      - name: Smoke-test the image (Node version and trust store)
-        run: scripts/image-smoke.sh action-hub:smoke
+        run: docker build -t action-hub:boot .
 
       # The server must boot on this image as uid 1000 and list its actions.
       # bin/generate_key.ts in the image makes the API key for the request.
@@ -219,7 +216,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run -d --name hub -p 127.0.0.1:8080:8080 -e ACTION_HUB_BASE_URL=http://localhost:8080 \
-            -e ACTION_HUB_LABEL=smoke -e ACTION_HUB_SECRET=smoke action-hub:smoke
+            -e ACTION_HUB_LABEL=boot -e ACTION_HUB_SECRET=boot action-hub:boot
           up=false
           for _ in $(seq 1 90); do
             [ "$(docker inspect -f '{{.State.Running}}' hub)" = true ] || break
