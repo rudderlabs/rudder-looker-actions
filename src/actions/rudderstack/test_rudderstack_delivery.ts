@@ -61,7 +61,7 @@ describe("RudderStack delivery", () => {
     notUrls.forEach((raw) => {
       it(`rejects ${JSON.stringify(raw)} as not a URL`, () => {
         chai.expect(() => normalizeDataPlaneUrl(raw)).to.throw(
-          "Rudder Data Plane URL validation failed: not a valid URL.",
+          "Data Plane URL validation failed: not a valid URL.",
         )
       })
     })
@@ -70,7 +70,7 @@ describe("RudderStack delivery", () => {
     notHttps.forEach((raw) => {
       it(`rejects ${JSON.stringify(raw)} as not https`, () => {
         chai.expect(() => normalizeDataPlaneUrl(raw)).to.throw(
-          "Rudder Data Plane URL validation failed: must use https.",
+          "Data Plane URL validation failed: must use https.",
         )
       })
     })
@@ -252,7 +252,7 @@ describe("RudderStack delivery", () => {
       tracker.setFlowControl(control)
 
       for (let i = 0; i < 4; i++) {
-        tracker.markSent()
+        tracker.markPending()
       }
       chai.expect(control.pause.callCount).to.equal(1)
 
@@ -267,7 +267,7 @@ describe("RudderStack delivery", () => {
       const tracker = new RudderDeliveryTracker(2, 1000)
       tracker.setFlowControl(control)
       for (let i = 0; i < 5; i++) {
-        tracker.markSent()
+        tracker.markPending()
       }
       chai.expect(control.pause.callCount).to.equal(1)
       tracker.endStreaming()
@@ -276,7 +276,7 @@ describe("RudderStack delivery", () => {
     it("counts failures and keeps the first error messages", () => {
       const tracker = new RudderDeliveryTracker(100, 1000)
       for (let i = 0; i < 5; i++) {
-        tracker.markSent()
+        tracker.markPending()
         tracker.onEventDone(new Error(`failure ${i}`))
       }
       chai.expect(tracker.failed).to.equal(5)
@@ -287,7 +287,7 @@ describe("RudderStack delivery", () => {
       const tracker = new RudderDeliveryTracker(100, 1000)
       const messages = ["status 400", "status 400", "status 502", "status 400"]
       messages.forEach((message) => {
-        tracker.markSent()
+        tracker.markPending()
         tracker.onEventDone(new Error(message))
       })
       chai.expect(tracker.failed).to.equal(4)
@@ -298,8 +298,8 @@ describe("RudderStack delivery", () => {
       const control = flowControlSpy()
       const tracker = new RudderDeliveryTracker(2, 20)
       tracker.setFlowControl(control)
-      tracker.markSent()
-      tracker.markSent()
+      tracker.markPending()
+      tracker.markPending()
 
       await new Promise((resolve) => setTimeout(resolve, 60))
       chai.expect(control.abort.calledOnce).to.equal(true)
@@ -310,8 +310,8 @@ describe("RudderStack delivery", () => {
       const control = flowControlSpy()
       const tracker = new RudderDeliveryTracker(2, 20)
       tracker.setFlowControl(control)
-      tracker.markSent()
-      tracker.markSent()
+      tracker.markPending()
+      tracker.markPending()
       tracker.endStreaming()
 
       await new Promise((resolve) => setTimeout(resolve, 60))
@@ -327,7 +327,7 @@ describe("RudderStack delivery", () => {
       const tracker = new RudderDeliveryTracker(4, 40)
       tracker.setFlowControl(control)
       for (let i = 0; i < 4; i++) {
-        tracker.markSent()
+        tracker.markPending()
       }
 
       // Each callback inside the stall window restarts it; the second one resumes.
@@ -344,16 +344,16 @@ describe("RudderStack delivery", () => {
 
     it("does not count an event the SDK rejected before queueing", () => {
       const tracker = new RudderDeliveryTracker(100, 1000)
-      tracker.markSent()
-      tracker.revertSent()
-      chai.expect(tracker.sent).to.equal(0)
+      tracker.markPending()
+      tracker.revertPending()
+      chai.expect(tracker.queued).to.equal(0)
       chai.expect(tracker.pending).to.equal(0)
     })
 
     it("resolves the drain only once every event has a callback", async () => {
       const tracker = new RudderDeliveryTracker(100, 1000)
-      tracker.markSent()
-      tracker.markSent()
+      tracker.markPending()
+      tracker.markPending()
       let drained = false
       const drain = tracker.waitForDrain(1000).then((result) => { drained = result })
 
@@ -368,7 +368,7 @@ describe("RudderStack delivery", () => {
 
     it("gives up on the drain after the timeout", async () => {
       const tracker = new RudderDeliveryTracker(100, 1000)
-      tracker.markSent()
+      tracker.markPending()
       chai.expect(await tracker.waitForDrain(20)).to.equal(false)
       chai.expect(tracker.pending).to.equal(1)
     })
@@ -422,7 +422,7 @@ describe("RudderStack delivery", () => {
     })
 
     it("responds after the drain timeout when callbacks never arrive", async () => {
-      // Calls are accepted but never acknowledged.
+      // Calls are accepted but never get a delivery result.
       const stalledAction = new TestRudderIdentifyAction(() => fakeRudderClient(), { drainTimeoutMs: 30 })
       const warn = sandbox.stub(winston, "warn")
 
@@ -444,7 +444,7 @@ describe("RudderStack delivery", () => {
     })
 
     it("stops streaming and still responds when delivery stalls while paused", async () => {
-      // Calls are accepted but never acknowledged, and the stream pauses after 2 events.
+      // Calls are accepted but never get a delivery result, and the stream pauses after 2 events.
       const stalledAction = new TestRudderIdentifyAction(() => fakeRudderClient(), {
         drainTimeoutMs: 30,
         sdkSettings: { maxPendingEvents: 2 },
@@ -473,7 +473,7 @@ describe("RudderStack delivery", () => {
       chai.expect(response.success).to.equal(true)
       chai.expect(info.calledWithMatch(
         "[Rudder] execute summary",
-        { rows: 3, sent: 3, unconfirmed: 3, streamStopped: false },
+        { rows: 3, queued: 3, unconfirmed: 3, streamStopped: false },
       )).to.equal(true)
       chai.expect(warn.calledWithMatch("[Rudder] delivery stalled")).to.equal(false)
       chai.expect(warn.calledWithMatch("[Rudder] 3 of 3 events had no delivery result")).to.equal(true)
@@ -503,7 +503,21 @@ describe("RudderStack delivery", () => {
 
       const response = await action.validateAndExecute(identifyRequest(1, "ftp://dp.example.com"))
       chai.expect(response.success).to.equal(false)
-      chai.expect(response.message).to.equal("Rudder Data Plane URL validation failed: must use https.")
+      chai.expect(response.message).to.equal("Data Plane URL validation failed: must use https.")
+      chai.expect(createClient.called).to.equal(false)
+    })
+
+    it("fails without sending when the write key is missing", async () => {
+      const createClient = sandbox.spy(() => ackingRudderClient())
+      const action = new TestRudderIdentifyAction(createClient)
+      const request = identifyRequest(1)
+      request.params = { rudder_server_url: "https://dp.example.com" }
+
+      // validateAndExecute() rejects a missing required setting before the action
+      // runs, so the action's own check is exercised through execute().
+      const response = await action.execute(request)
+      chai.expect(response.success).to.equal(false)
+      chai.expect(response.message).to.equal("Write key is required.")
       chai.expect(createClient.called).to.equal(false)
     })
 

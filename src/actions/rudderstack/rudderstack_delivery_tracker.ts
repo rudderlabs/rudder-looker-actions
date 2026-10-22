@@ -10,13 +10,17 @@ export function describeDeliveryError(error: unknown): string {
 /**
  * Counts events handed to the SDK against their delivery callbacks. Pauses the
  * incoming stream while too many events are pending and resolves drain waiters
- * once every sent event has been acknowledged or has failed. If the stream stays
+ * once every queued event has been delivered or has failed. If the stream stays
  * paused with no delivery result for `stallTimeoutMs`, it aborts the stream so the
  * action can finish instead of waiting forever.
  */
 export class RudderDeliveryTracker {
-  sent = 0
-  acked = 0
+  // Events handed to the SDK. The SDK sends them later, in batches; each one is
+  // pending until its callback reports it delivered or failed.
+  queued = 0
+  // Events in a batch the data plane accepted. Delivery to destinations happens
+  // later, in RudderStack, and is not visible here.
+  delivered = 0
   failed = 0
   stalled = false
   readonly errorMessages: string[] = []
@@ -31,15 +35,20 @@ export class RudderDeliveryTracker {
   ) {}
 
   get pending() {
-    return this.sent - this.acked - this.failed
+    return this.queued - this.delivered - this.failed
   }
 
   setFlowControl(control: Hub.StreamFlowControl) {
     this.flowControl = control
   }
 
-  markSent() {
-    this.sent++
+  /**
+   * Counts an event as pending before it is handed to the SDK, pausing the stream
+   * once too many are pending. Counting first keeps the event pending however the
+   * SDK calls back; `revertPending()` undoes it if the SDK throws instead.
+   */
+  markPending() {
+    this.queued++
     if (
       !this.paused &&
       this.flowControl &&
@@ -52,8 +61,8 @@ export class RudderDeliveryTracker {
   }
 
   // The SDK threw before queueing the event, so no callback will arrive for it.
-  revertSent() {
-    this.sent--
+  revertPending() {
+    this.queued--
     this.settle()
   }
 
@@ -68,7 +77,7 @@ export class RudderDeliveryTracker {
         this.errorMessages.push(message)
       }
     } else {
-      this.acked++
+      this.delivered++
     }
     this.settle()
   }

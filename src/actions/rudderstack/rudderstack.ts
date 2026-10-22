@@ -12,9 +12,9 @@ import { RudderActionError } from "./rudderstack_error"
 
 const DATA_PLANE_BATCH_PATH = "/v1/batch"
 const DATA_PLANE_URL_NOT_A_URL_MESSAGE =
-  "Rudder Data Plane URL validation failed: not a valid URL."
+  "Data Plane URL validation failed: not a valid URL."
 const DATA_PLANE_URL_NOT_HTTPS_MESSAGE =
-  "Rudder Data Plane URL validation failed: must use https."
+  "Data Plane URL validation failed: must use https."
 // Backstop for waiting on delivery callbacks once streaming has ended. Requests
 // already time out on their own; this guarantees the action always responds.
 const DRAIN_TIMEOUT_MS = 5 * 60 * 1000
@@ -330,7 +330,7 @@ export class RudderAction extends Hub.Action {
     const writeKey = request.params.rudder_write_key
     if (!writeKey) {
       return this.buildResponse([
-        new RudderActionError("Rudder Write Key is required."),
+        new RudderActionError("Write key is required."),
       ])
     }
     let dataPlaneUrl: string
@@ -412,11 +412,11 @@ export class RudderAction extends Hub.Action {
           if (!payload.event) {
             delete payload.event
           }
-          tracker.markSent()
+          tracker.markPending()
           try {
             client[rudderCall](payload, tracker.onEventDone)
           } catch (e) {
-            tracker.revertSent()
+            tracker.revertPending()
             errors.push(toError(e))
           }
         },
@@ -452,8 +452,8 @@ export class RudderAction extends Hub.Action {
     winston.info("[Rudder] execute summary", {
       webhookId: request.webhookId,
       rows: totalRows,
-      sent: tracker.sent,
-      acked: tracker.acked,
+      queued: tracker.queued,
+      delivered: tracker.delivered,
       failed: tracker.failed,
       unconfirmed,
       streamStopped: tracker.stalled,
@@ -463,7 +463,7 @@ export class RudderAction extends Hub.Action {
 
     if (unconfirmed > 0) {
       winston.warn(
-        `[Rudder] ${unconfirmed} of ${tracker.sent} events had no delivery result ` +
+        `[Rudder] ${unconfirmed} of ${tracker.queued} events had no delivery result ` +
           `${this.drainTimeoutMs}ms after streaming ended; reported as unconfirmed`,
         { webhookId: request.webhookId },
       )
@@ -473,7 +473,7 @@ export class RudderAction extends Hub.Action {
     // they are logged so they can be alerted on.
     if (tracker.failed > 0) {
       winston.warn(
-        `[Rudder] ${tracker.acked} of ${tracker.sent} events sent to RudderStack; ` +
+        `[Rudder] ${tracker.delivered} of ${tracker.queued} events sent to RudderStack; ` +
           `${tracker.failed} failed (first errors: ${tracker.errorMessages.join("; ")})`,
         { webhookId: request.webhookId },
       )

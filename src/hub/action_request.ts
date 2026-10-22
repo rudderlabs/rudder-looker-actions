@@ -263,7 +263,7 @@ export class ActionRequest {
         if (this.attachment && this.attachment.dataBuffer) {
           winston.info(`Using "fake" streaming because request contained attachment data.`, this.logInfo)
           const dataBuffer = this.attachment.dataBuffer
-          winston.info(`DataBuffer: ${dataBuffer.length}`)
+          winston.info(`DataBuffer length: ${dataBuffer.length}`)
           for (let offset = 0; offset < dataBuffer.length; offset += ATTACHMENT_STREAM_CHUNK_BYTES) {
             stream.write(dataBuffer.subarray(offset, offset + ATTACHMENT_STREAM_CHUNK_BYTES))
           }
