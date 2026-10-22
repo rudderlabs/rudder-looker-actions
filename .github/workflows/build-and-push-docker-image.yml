@@ -11,8 +11,11 @@ name: build and push image pr
 on:
   pull_request:
 
-permissions:
-  contents: read
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   # A branch name is not a valid Docker tag: "chore/foo" contains a slash.
@@ -24,13 +27,14 @@ jobs:
   get-image-tag:
     name: Compute image tag
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read # minimum required permission for job execution
     outputs:
       img_tag: ${{ steps.tag.outputs.img_tag }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -68,21 +72,24 @@ jobs:
       fail-fast: false
       matrix:
         build-config:
-          - os: arc-arm64
+          # GitHub-hosted: this job runs PR code, fork PRs included, and the repo is public.
+          - os: ubuntu-24.04-arm
             arch: arm64
             platform: linux/arm64
-          - os: arc-amd64
+          - os: ubuntu-latest
             arch: amd64
             platform: linux/amd64
     runs-on: ${{ matrix.build-config.os }}
+    timeout-minutes: 60
     env:
       # Fork PRs get neither secrets nor an OIDC token under `pull_request`, so
       # they build only. Same-repo PRs publish to both registries. A boolean
       # expression casts to the string 'true' or 'false'.
-      CAN_PUBLISH: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+      # Dependabot PRs get no Actions secrets either, so they build only too.
+      CAN_PUBLISH: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -111,18 +118,19 @@ jobs:
           dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # Fork PRs pushed nothing, so there are no per-arch images to stitch.
+  # Fork and Dependabot PRs pushed nothing, so there are no per-arch images to stitch.
   create-manifest-ecr:
     name: Create multi-arch manifest for ECR
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [build-images]
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
     permissions:
       id-token: write # to request the OIDC JWT for AWS (configure-aws-credentials)
       contents: read # to checkout repository code (actions/checkout)
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -142,17 +150,18 @@ jobs:
           role_session_name: ${{ github.event.repository.name }}-manifest
 
   # TODO: Remove this once we have migrated to ECR.
-  # Fork PRs pushed nothing, so there are no per-arch images to stitch.
+  # Fork and Dependabot PRs pushed nothing, so there are no per-arch images to stitch.
   create-manifest-dockerhub:
     name: Create multi-arch manifest for DockerHub
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [get-image-tag, build-images]
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
     permissions:
       contents: read # to checkout repository code (actions/checkout)
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -169,3 +178,51 @@ jobs:
           image_tag: rudderstack/action-hub:${{ needs.get-image-tag.outputs.img_tag }}
           dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  # Builds the image on GitHub-hosted runners and boots it. Fork PRs run it
+  # too, since it needs no secrets.
+  image-boot:
+    name: Boot the image (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm
+            platform: linux/arm64
+          - os: ubuntu-latest
+            platform: linux/amd64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read # actions/checkout
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+
+      - name: Check out repository code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the image
+        run: docker build -t action-hub:boot .
+
+      # The server must boot on this image as uid 1000 and list its actions.
+      # bin/generate_key.ts in the image makes the API key for the request.
+      - name: Boot the server and list the actions
+        run: |
+          set -euo pipefail
+          docker run -d --name hub -p 127.0.0.1:8080:8080 -e ACTION_HUB_BASE_URL=http://localhost:8080 \
+            -e ACTION_HUB_LABEL=boot -e ACTION_HUB_SECRET=boot action-hub:boot
+          up=false
+          for _ in $(seq 1 90); do
+            [ "$(docker inspect -f '{{.State.Running}}' hub)" = true ] || break
+            curl -sf --max-time 5 -o /dev/null http://127.0.0.1:8080/ && { up=true; break; }
+            sleep 2
+          done
+          [ "$up" = true ] || { docker logs hub; exit 1; }
+          key=$(docker exec hub node ./node_modules/ts-node/dist/bin.js ./bin/generate_key.ts | grep -Ex '[0-9a-f]{64}/[0-9a-f]{128}')
+          curl -sf --max-time 30 -X POST -H "Authorization: Token token=\"$key\"" http://127.0.0.1:8080/ \
+            | jq -e '.integrations | type == "array" and length > 0' || { docker logs hub; exit 1; }

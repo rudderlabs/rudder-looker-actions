@@ -41,3 +41,21 @@ Head over to [the issue tracker](https://github.com/looker-open-source/actions/i
 Most users should use our official action hub cloud service running on (https://actions.looker.com/). By default, that's what Looker will use to provide actions. The action hub works whether your Looker instance is hosted by us or on-premise. If you'd like to deploy a copy of the same actions within your own infrastructure, you can do so by deploying this repository yourself, and adding it to Looker as a new hub.
 
 [Deployment instructions &rarr;](docs/deploying.md)
+
+## How to bump the runtime
+
+`.nvmrc` holds the one Node version. A Node bump changes these places together:
+
+- `.nvmrc`
+- the `FROM node:<version>-alpine<alpine>@sha256:<index digest>` line in `Dockerfile`
+- the lower bound of `engines.node` (`>=<version> <major+1>`) and `devEngines.runtime.version` in `package.json`
+
+Dependabot bumps the `FROM` line with no cooldown. It does not touch the other files, so its PR fails CI until you update them on the same branch.
+
+Check the four places with one command:
+
+```sh
+scripts/check-node-version.sh
+```
+
+The Dockerfile installs `ca-certificates-bundle>=20261020`. apk fails the build when no such package exists.

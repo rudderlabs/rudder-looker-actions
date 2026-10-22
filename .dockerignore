@@ -1,1 +1,12 @@
-node_modules/
+# Allowlist: the build context holds only what the Dockerfile copies.
+*
+!.npmrc
+!.yarnrc
+!.yarn/releases/
+!package.json
+!yarn.lock
+!tsconfig.json
+!tsconfig.npm.json
+!src/
+!bin/
+!public/

@@ -19,9 +19,12 @@ on:
       RELEASE_PRIVATE_KEY:
         required: true
 
-permissions:
-  id-token: write # allows the JWT to be requested from GitHub's OIDC provider
-  contents: read # required for actions/checkout
+permissions: {}
+
+# A release tag is published once. A second run for the same tag waits.
+concurrency:
+  group: publish-release-${{ inputs.image_tag }}
+  cancel-in-progress: false
 
 jobs:
   # Each architecture is built on a native runner and pushed under an
@@ -53,9 +56,10 @@ jobs:
             arch: amd64
             platform: linux/amd64
     runs-on: ${{ matrix.build-config.os }}
+    timeout-minutes: 60
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -82,13 +86,14 @@ jobs:
   create-manifest-ecr:
     name: Create multi-arch manifest for ECR
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [build-images]
     permissions:
       id-token: write # to request the OIDC JWT for AWS (configure-aws-credentials)
       contents: read # to checkout repository code (actions/checkout)
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -111,12 +116,13 @@ jobs:
   create-manifest-dockerhub:
     name: Create multi-arch manifest for DockerHub
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [build-images]
     permissions:
       contents: read # to checkout repository code (actions/checkout)
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
@@ -137,6 +143,7 @@ jobs:
   create-pull-request-devops:
     name: Create ${{ matrix.environment }} PR for looker-action-hub (devops)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [create-manifest-ecr, create-manifest-dockerhub]
     permissions:
       contents: read # cross-repo writes use the app token below
@@ -154,7 +161,7 @@ jobs:
       ENVIRONMENT: ${{ matrix.environment }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
 
