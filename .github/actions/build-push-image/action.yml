@@ -55,11 +55,11 @@ runs:
   using: 'composite'
   steps:
     - name: Setup Docker Buildx
-      uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
     - name: Configure AWS Credentials
       if: ${{ inputs.can_publish == 'true' }}
-      uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+      uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
       with:
         aws-region: ${{ inputs.aws_region }}
         role-to-assume: ${{ inputs.aws_iam_role }}
@@ -68,11 +68,11 @@ runs:
     - name: Login to ECR
       if: ${{ inputs.can_publish == 'true' }}
       id: login-ecr
-      uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+      uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
     - name: Build and Push Image to ECR
       if: ${{ inputs.can_publish == 'true' }}
-      uses: rudderlabs/build-scan-push-action@8b0c8fa6e6d526c296bc1de587abb8ed2ee6e903 # v2.3.0
+      uses: rudderlabs/build-scan-push-action@c47115e5eab78162efec1b4961cba4063dfd8d5f # v2.4.0
       with:
         context: .
         push: true
@@ -85,7 +85,7 @@ runs:
     # chart still pins the Docker Hub image.
     - name: Logging in to Docker
       if: ${{ inputs.can_publish == 'true' }}
-      uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # v2.2.0
+      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
       with:
         username: ${{ inputs.dockerhub_username }}
         password: ${{ inputs.dockerhub_token }}
@@ -94,7 +94,7 @@ runs:
     # the Dockerfile still builds.
     # TODO: Remove the Docker Hub push once we have migrated to ECR.
     - name: Build and Push Image to DockerHub
-      uses: rudderlabs/build-scan-push-action@8b0c8fa6e6d526c296bc1de587abb8ed2ee6e903 # v2.3.0
+      uses: rudderlabs/build-scan-push-action@c47115e5eab78162efec1b4961cba4063dfd8d5f # v2.4.0
       with:
         context: .
         push: ${{ inputs.can_publish == 'true' }}

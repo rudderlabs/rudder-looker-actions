@@ -59,12 +59,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: audit
 
       - name: Check out repository code
-        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false # nothing here talks to git after checkout
 
@@ -93,13 +93,13 @@ jobs:
       contents: read # to checkout repository code (actions/checkout)
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: audit
 
       # A local composite action is only resolvable if the repo is checked out.
       - name: Check out repository code
-        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -122,13 +122,13 @@ jobs:
       contents: read # to checkout repository code (actions/checkout)
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: audit
 
       # A local composite action is only resolvable if the repo is checked out.
       - name: Check out repository code
-        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -161,13 +161,13 @@ jobs:
       ENVIRONMENT: ${{ matrix.environment }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: audit
 
       - name: Generate GitHub App Token
         id: generate-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_PRIVATE_KEY }}
@@ -176,7 +176,7 @@ jobs:
           repositories: rudder-devops # to access rudder-devops repository
 
       - name: Checkout Devops Repo
-        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: rudderlabs/rudder-devops
           ref: master # base the release branch on an explicit ref, not "whatever HEAD is"
@@ -200,7 +200,7 @@ jobs:
         # v1.4.0 is the first tagged release with the `repository` input, which
         # is required to target rudder-devops (v1.2.0 silently ignores it and
         # would commit to this repo instead).
-        uses: ryancyq/github-signed-commit@6afa32d8aa9819faddc248e6258e9c11ec05ecc8 # v1.4.0
+        uses: ryancyq/github-signed-commit@cb9b21ee83578fe8e26a9eda530015aedf0c7c5b # v1.4.1
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         with:
