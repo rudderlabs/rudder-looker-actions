@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/rudderlabs/rudder-looker-actions/compare/1.5.2...1.6.0) (2026-10-28)
+
+
+### Features
+
+* **hub:** make the execute process timeout configurable ([#79](https://github.com/rudderlabs/rudder-looker-actions/issues/79)) ([154f62b](https://github.com/rudderlabs/rudder-looker-actions/commit/154f62b6f7212f3d79b20f91e6f45d35fa67a92e))
+
 ## [1.5.2](https://github.com/rudderlabs/rudder-looker-actions/compare/1.5.1...1.5.2) (2026-10-27)
 
 
