@@ -157,7 +157,6 @@ jobs:
         environment: [staging, prod]
     env:
       TAG_NAME: ${{ inputs.image_tag }}
-      IMAGE_REPO: ${{ inputs.image_repo }}
       ENVIRONMENT: ${{ matrix.environment }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -189,7 +188,7 @@ jobs:
       - name: Update image tag in devops repo
         run: |
           cd "helm-charts/helm/looker-action-hub/environment/$ENVIRONMENT"
-          yq eval -i ".actionhubImage.image=\"$IMAGE_REPO:$TAG_NAME\"" base.yaml
+          yq eval -i '.actionhubImage.tag = strenv(TAG_NAME)' base.yaml
 
       # The branch is not created here: github-signed-commit runs
       # `git checkout -b <branch>` + `git push --set-upstream origin HEAD`
