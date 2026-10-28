@@ -1,9 +1,27 @@
 import * as spawn from "child_process"
 import * as winston from "winston"
+import {readPositiveInteger} from "../hub/utils"
 import {ProcessQueue} from "./process_queue"
 
+const EXECUTE_PROCESS_TIMEOUT_ENV = "ACTION_HUB_EXECUTE_PROCESS_TIMEOUT_MS"
+const DEFAULT_EXECUTE_PROCESS_TIMEOUT_MS = 1000 * 60 * 60 // 1 hour
+// setTimeout fires immediately for delays above 2^31-1 ms (~24.8 days), so the
+// configured timeout is capped well below that.
+const MAX_EXECUTE_PROCESS_TIMEOUT_MS = 1000 * 60 * 60 * 24 // 24 hours
+
+/** Reads how long an execute process may run before it is killed. */
+export function parseExecuteProcessTimeoutMs(env: NodeJS.ProcessEnv): number {
+    return readPositiveInteger(env, EXECUTE_PROCESS_TIMEOUT_ENV, {
+        fallback: DEFAULT_EXECUTE_PROCESS_TIMEOUT_MS,
+        maximum: MAX_EXECUTE_PROCESS_TIMEOUT_MS,
+    })
+}
+
+const EXECUTE_PROCESS_TIMEOUT_MS = parseExecuteProcessTimeoutMs(process.env)
+winston.info(`execute process timeout: ${EXECUTE_PROCESS_TIMEOUT_MS}ms`)
+
 export class ExecuteProcessQueue extends ProcessQueue {
-    PROCESS_TIMEOUT = 1000 * 60 * 60 // 1 hour in milliseconds
+    PROCESS_TIMEOUT = EXECUTE_PROCESS_TIMEOUT_MS
 
     processTimeoutKiller(child: spawn.ChildProcess, webhookId: string, cb: any) {
         const msg = "Killed execute process due to timeout in responding to parent process"

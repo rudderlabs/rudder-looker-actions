@@ -70,33 +70,7 @@ const MAX_REQUEST_TIMEOUT_MS = DRAIN_TIMEOUT_MS
 // after a pause. The pending limit is at most half the queue, so a queue of at least
 // this size leaves room for that overshoot.
 const MIN_INTERNAL_QUEUE_SIZE = 10000
-
-function readPositiveInteger(
-  env: NodeJS.ProcessEnv,
-  name: string,
-  fallback: number,
-  maximum: number,
-  minimum = 1,
-): number {
-  const raw = env[name]
-  if (raw === undefined || raw.trim() === "") {
-    return fallback
-  }
-  const value = Number(raw)
-  if (!Number.isInteger(value) || value <= 0) {
-    winston.warn(`[Rudder] ignoring invalid ${name}="${raw}", using ${fallback}`)
-    return fallback
-  }
-  if (value > maximum) {
-    winston.warn(`[Rudder] ${name}=${raw} is above the maximum ${maximum}, using ${maximum}`)
-    return maximum
-  }
-  if (value < minimum) {
-    winston.warn(`[Rudder] ${name}=${raw} is below the minimum ${minimum}, using ${minimum}`)
-    return minimum
-  }
-  return value
-}
+const SDK_SETTINGS_LOG_PREFIX = "[Rudder]"
 
 /**
  * Reads SDK delivery settings from the environment. Invalid values are logged
@@ -105,28 +79,19 @@ function readPositiveInteger(
 export function parseRudderSdkSettings(
   env: NodeJS.ProcessEnv,
 ): RudderSdkSettings {
-  const flushAt = readPositiveInteger(
-    env,
-    "RUDDER_SDK_FLUSH_AT",
-    DEFAULT_RUDDER_SDK_SETTINGS.flushAt,
-    MAX_FLUSH_AT,
-  )
-  const maxBatchBytes = readPositiveInteger(
-    env,
-    "RUDDER_SDK_MAX_BATCH_BYTES",
-    DEFAULT_RUDDER_SDK_SETTINGS.maxBatchBytes,
-    MAX_BATCH_BYTES,
-  )
-  const maxInternalQueueSize = readPositiveInteger(
-    env,
+  const read = (name: string, fallback: number, maximum: number, minimum?: number) =>
+    Hub.readPositiveInteger(env, name, { fallback, maximum, minimum, logPrefix: SDK_SETTINGS_LOG_PREFIX })
+
+  const flushAt = read("RUDDER_SDK_FLUSH_AT", DEFAULT_RUDDER_SDK_SETTINGS.flushAt, MAX_FLUSH_AT)
+  const maxBatchBytes = read("RUDDER_SDK_MAX_BATCH_BYTES", DEFAULT_RUDDER_SDK_SETTINGS.maxBatchBytes, MAX_BATCH_BYTES)
+  const maxInternalQueueSize = read(
     "RUDDER_SDK_MAX_INTERNAL_QUEUE_SIZE",
     DEFAULT_RUDDER_SDK_SETTINGS.maxInternalQueueSize,
     MAX_INTERNAL_QUEUE_SIZE,
     MIN_INTERNAL_QUEUE_SIZE,
   )
   // Not bounded here: the adjustments below cap it and log a single warning.
-  let maxPendingEvents = readPositiveInteger(
-    env,
+  let maxPendingEvents = read(
     "RUDDER_SDK_MAX_PENDING_EVENTS",
     DEFAULT_RUDDER_SDK_SETTINGS.maxPendingEvents,
     Number.MAX_SAFE_INTEGER,
@@ -157,14 +122,12 @@ export function parseRudderSdkSettings(
         `${maxPendingEvents}: ${adjustmentReasons.join("; ")}`,
     )
   }
-  const flushIntervalMs = readPositiveInteger(
-    env,
+  const flushIntervalMs = read(
     "RUDDER_SDK_FLUSH_INTERVAL_MS",
     DEFAULT_RUDDER_SDK_SETTINGS.flushIntervalMs,
     MAX_FLUSH_INTERVAL_MS,
   )
-  const requestTimeoutMs = readPositiveInteger(
-    env,
+  const requestTimeoutMs = read(
     "RUDDER_SDK_REQUEST_TIMEOUT_MS",
     DEFAULT_RUDDER_SDK_SETTINGS.requestTimeoutMs,
     MAX_REQUEST_TIMEOUT_MS,
