@@ -7,14 +7,34 @@ import * as Hub from "../hub"
 import {DelegateOAuthAction, isDelegateOauthAction, isOauthAction, OAuthAction} from "../hub"
 import * as ExecuteProcessQueue from "../xpc/execute_process_queue"
 import * as ExtendedProcessQueue from "../xpc/extended_process_queue"
-import * as apiKey from "./api_key"
 const expressWinston = require("express-winston")
 const uparse = require("url")
 const blocked = require("blocked-at")
 
-const TOKEN_REGEX = new RegExp(/[T|t]oken token="(.*)"/)
 const statusJsonPath = path.resolve(`${__dirname}/../../status.json`)
 const useRaven = () => !!process.env.ACTION_HUB_RAVEN_DSN
+
+// Largest POST body the hub will buffer and parse. The registered actions stream
+// their data from Looker's download URL, so a request body carries only the
+// scheduled plan, form params and data params, never the query results. 10 MB
+// leaves ample headroom while bounding what an anonymous caller can make us parse.
+export const POST_BODY_LIMIT_BYTES = 10 * 1024 * 1024
+
+// Shape of the errors body-parser passes to the error middleware: a 4xx `status`
+// for a malformed (400), oversized (413) or unsupported-charset (415) body.
+interface HttpStatusError {
+  status: number
+  message: string
+}
+
+function isClientHttpError(e: unknown): e is HttpStatusError {
+  if (typeof e !== "object" || e === null) {
+    return false
+  }
+  const status: unknown = Reflect.get(e, "status")
+  const message: unknown = Reflect.get(e, "message")
+  return typeof status === "number" && status >= 400 && status < 500 && typeof message === "string"
+}
 
 // Should be used with actions that hold the event loop extensively
 const expensiveJobQueue = new ExecuteProcessQueue.ExecuteProcessQueue()
@@ -48,9 +68,6 @@ export default class Server implements Hub.RouteBuilder {
     if (!process.env.ACTION_HUB_LABEL) {
       throw new Error("No ACTION_HUB_LABEL environment variable set.")
     }
-    if (!process.env.ACTION_HUB_SECRET) {
-      throw new Error("No ACTION_HUB_SECRET environment variable set.")
-    }
     if (process.env.ACTION_HUB_DEBUG) {
       winston.configure({
         level: "debug",
@@ -82,12 +99,12 @@ export default class Server implements Hub.RouteBuilder {
 
   private actionList: {[key: string]: string} = {}
 
-  // Body parser for authenticated POST routes. Mounted per route, after the
-  // auth middleware, so an unauthenticated request is never buffered or parsed.
-  private jsonBodyParser: express.RequestHandler = express.json({limit: "250mb"})
+  // Body parser for the POST routes, capped at POST_BODY_LIMIT_BYTES. Mounted per
+  // route, so the static mount never buffers or parses a request body.
+  private jsonBodyParser: express.RequestHandler = express.json({limit: POST_BODY_LIMIT_BYTES})
 
-  // Small body parser for the unauthenticated OAuth GET routes, which only need
-  // req.body to default to {}. Bounds what an anonymous caller can make us parse.
+  // Small body parser for the OAuth GET routes, so a GET never buffers a large
+  // body. Those routes only need req.body to default to {}.
   private oauthJsonParser: express.RequestHandler = express.json({limit: "100kb"})
 
   constructor() {
@@ -256,32 +273,16 @@ export default class Server implements Hub.RouteBuilder {
   }
 
   private route(urlPath: string, fn: (req: express.Request, res: express.Response) => Promise<void>): void {
-    // Authenticate on headers alone before the body parser runs, so an
-    // unauthenticated request is rejected before its body is buffered or parsed.
-    this.app.post(urlPath, this.authenticate.bind(this), this.jsonBodyParser, this.asyncHandler(async (req, res) => {
+    this.app.post(urlPath, this.jsonBodyParser, this.asyncHandler(async (req, res) => {
       this.logInfo(req, res, "Starting request.")
       await fn(req, res)
     }))
   }
 
-  // Registers an unauthenticated OAuth GET route with a bounded body parser and
-  // crash-safe error handling.
+  // Registers an OAuth GET route with the small body parser and crash-safe
+  // error handling.
   private oauthRoute(urlPath: string, fn: (req: express.Request, res: express.Response) => Promise<void>): void {
     this.app.get(urlPath, this.oauthJsonParser, this.asyncHandler(fn))
-  }
-
-  // Header-only authentication middleware. Runs before any body parser so an
-  // unauthenticated request is rejected before its body is buffered or parsed.
-  private authenticate(req: express.Request, res: express.Response, next: express.NextFunction): void {
-    const headerValue = req.header("authorization")
-    const tokenMatch = headerValue ? headerValue.match(TOKEN_REGEX) : undefined
-    if (!tokenMatch || !apiKey.validate(tokenMatch[1])) {
-      res.status(403)
-      res.json({success: false, error: "Invalid 'Authorization' header."})
-      this.logInfo(req, res, "Unauthorized request.")
-      return
-    }
-    next()
   }
 
   // Error-handling middleware. Sends errors thrown by async handlers through
@@ -289,7 +290,15 @@ export default class Server implements Hub.RouteBuilder {
   // Registered as the last middleware in the constructor.
   private handleError(e: any, req: express.Request, res: express.Response, _next: express.NextFunction): void {
     this.logError(req, res, "Error on request")
-    if (typeof(e) === "string") {
+    if (isClientHttpError(e)) {
+      // A rejected request body (malformed, oversized or wrong charset) is the
+      // caller's fault: answer with its 4xx and keep it out of Raven.
+      if (!res.headersSent) {
+        res.status(e.status)
+        res.json({success: false, error: e.message})
+      }
+      this.logError(req, res, e.message)
+    } else if (typeof(e) === "string") {
       if (!res.headersSent) {
         res.status(404)
         res.json({success: false, error: e})

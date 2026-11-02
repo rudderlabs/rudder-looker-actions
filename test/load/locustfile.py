@@ -21,7 +21,6 @@ class ActionHubTaskSet(TaskSet):
         headers['User-Agent'] = "looker-actions-load-test/0.1"
         headers['X-Looker-Instance'] = "looker-actions-load-test-simulation"
         headers['X-Looker-Webhook-Id'] = "looker-actions-load-test-simulation"
-        headers['Authorization'] = 'Token token="' + os.getenv('ACTION_HUB_LOAD_TESTING_API_KEY') + '"'
 
         with self.client.post(uri, catch_response=True, json=data, headers=headers) as response:
             if response.status_code == 200:
