@@ -20,6 +20,11 @@ const useRaven = () => !!process.env.ACTION_HUB_RAVEN_DSN
 // leaves ample headroom while bounding what an anonymous caller can make us parse.
 export const POST_BODY_LIMIT_BYTES = 10 * 1024 * 1024
 
+// Most Looker versions whose action list the root route caches. The cache key is
+// the version in the caller's User-Agent, which anyone can vary, so the cache is
+// capped; versions past the cap are still answered, just built per request.
+export const MAX_CACHED_ACTION_LISTS = 20
+
 // Shape of the errors body-parser passes to the error middleware: a 4xx `status`
 // for a malformed (400), oversized (413) or unsupported-charset (415) body.
 interface HttpStatusError {
@@ -97,7 +102,7 @@ export default class Server implements Hub.RouteBuilder {
 
   app: express.Application
 
-  private actionList: {[key: string]: string} = {}
+  private actionLists = new Map<string, string>()
 
   // Body parser for the POST routes, capped at POST_BODY_LIMIT_BYTES. Mounted per
   // route, so the static mount never buffers or parses a request body.
@@ -124,17 +129,21 @@ export default class Server implements Hub.RouteBuilder {
     this.route("/", async (req, res) => {
       const request = Hub.ActionRequest.fromRequest(req)
       const version = request.lookerVersion ? request.lookerVersion : "5.5.0"
-      if (!this.actionList[version]) {
+      let actionList = this.actionLists.get(version)
+      if (actionList === undefined) {
         const actions = await Hub.allActions({ lookerVersion: request.lookerVersion })
         const response = {
           integrations: actions.map((d) => d.asJson(this, request)),
           label: process.env.ACTION_HUB_LABEL,
         }
-        this.actionList[version] = JSON.stringify(response)
+        actionList = JSON.stringify(response)
+        if (this.actionLists.size < MAX_CACHED_ACTION_LISTS) {
+          this.actionLists.set(version, actionList)
+        }
       }
       res.type("json")
-      res.send(this.actionList[version])
-      winston.debug(`version: ${version}, response: ${this.actionList[version]}`)
+      res.send(actionList)
+      winston.debug(`version: ${version}, response: ${actionList}`)
     })
 
     this.route("/actions/:actionId", async (req, res) => {

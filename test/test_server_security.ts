@@ -5,7 +5,7 @@ import * as sinon from "sinon"
 
 import "../src/actions/index"
 import * as sources from "../src/hub/sources"
-import Server, {POST_BODY_LIMIT_BYTES} from "../src/server/server"
+import Server, {MAX_CACHED_ACTION_LISTS, POST_BODY_LIMIT_BYTES} from "../src/server/server"
 
 // A valid JSON object of exactly `bytes` bytes: {"pad":"aaa…"}.
 function jsonBodyOfSize(bytes: number): string {
@@ -122,6 +122,32 @@ describe("action hub request security", () => {
     })
     chai.expect(res.status).to.equal(200)
     chai.expect(res.body.integrations.length).to.be.greaterThan(0)
+  })
+
+  it("caps the action-list cache so new User-Agent versions cannot grow it", async () => {
+    const app = new Server().app
+    const versionsSent = MAX_CACHED_ACTION_LISTS + 5
+    const userAgentFor = (patch: number) => ({"user-agent": `LookerOutgoingWebhook/7.0.${patch}`})
+    const allActions = sinon.spy(sources, "allActions")
+    try {
+      for (let patch = 0; patch < versionsSent; patch++) {
+        const listed = await send(app, {method: "POST", path: "/", headers: userAgentFor(patch)})
+        chai.expect(listed.status).to.equal(200)
+      }
+      chai.expect(allActions.callCount).to.equal(versionsSent)
+
+      // A version cached before the cap is served without rebuilding the list.
+      await send(app, {method: "POST", path: "/", headers: userAgentFor(0)})
+      chai.expect(allActions.callCount).to.equal(versionsSent)
+
+      // A version past the cap was never stored, so it is rebuilt on every request.
+      const res = await send(app, {method: "POST", path: "/", headers: userAgentFor(versionsSent - 1)})
+      chai.expect(res.status).to.equal(200)
+      chai.expect(res.body.integrations.length).to.be.greaterThan(0)
+      chai.expect(allActions.callCount).to.equal(versionsSent + 1)
+    } finally {
+      allActions.restore()
+    }
   })
 
   it("does not crash on an OAuth GET for an unknown action (RUD-2680 Finding B)", async () => {
