@@ -2,7 +2,7 @@
 # check=error=true
 
 # The Node version must match .nvmrc. scripts/check-node-version.sh checks both files.
-FROM node:24.22.1-alpine3.24@sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d AS base
+FROM node:24.22.2-alpine3.24@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS base
 # Node uses its bundled root store. ca-certificates-bundle 20261020 drops the eMudhra intermediates from the
 # system CA store for other tools. apk refuses the install when no bundle at or above that version is available.
 RUN apk --no-cache upgrade && apk --no-cache add tini 'ca-certificates-bundle>=20261020'
