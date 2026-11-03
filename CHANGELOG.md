@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/rudderlabs/rudder-looker-actions/compare/1.6.0...1.6.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **server:** remove the shared-secret check and cap POST bodies at 10 MB ([#83](https://github.com/rudderlabs/rudder-looker-actions/issues/83)) ([554b617](https://github.com/rudderlabs/rudder-looker-actions/commit/554b617657433c52047b3477c77bab672115ba29))
+
 ## [1.6.0](https://github.com/rudderlabs/rudder-looker-actions/compare/1.5.2...1.6.0) (2026-10-28)
 
 
