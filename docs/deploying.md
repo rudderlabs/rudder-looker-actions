@@ -11,7 +11,6 @@ Because Looker will only accept an action hub with a valid HTTPS certificate, it
       
       Use the URL for your Heroku application that was mentioned after running `git push heroku master` above
    * `heroku config:set ACTION_HUB_LABEL="Awesome Action Hub"`
-   * `heroku config:set ACTION_HUB_SECRET="<my-secret>"`
 
 We recommend that you work on features using a branch. To create and push a branch to Heroku:
 
@@ -32,17 +31,11 @@ If at some point you forget the URL of your Heroku server, you can run:
 
 #### Adding the Action Hub to Looker
 
-Make sure your action hub is running. You will then need to run the following command on the server that is running the action hub:
-
-    yarn generate-api-key
-
-Note that if you are using Heroku, you can run this command on your dyno by running `heroku run yarn generate-api-key`.
-
-Save the value that is returned and then navigate to the actions admin page on a Looker instance or go directly to:
+Make sure your action hub is running, then navigate to the actions admin page on a Looker instance or go directly to:
 
     https://my-looker.looker.com/admin/actions?edit=true
 
-There, add the URL for your action hub and enter the token returned by `yarn generate-api-key` above. You should see a list of actions supported by your hub.
+There, add the URL for your action hub. The hub does not check an authorization token, so leave Looker's optional token field empty. You should see a list of actions supported by your hub.
 
 #### Testing your Action
 

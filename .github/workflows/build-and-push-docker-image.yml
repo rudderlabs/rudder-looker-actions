@@ -210,12 +210,11 @@ jobs:
         run: docker build -t action-hub:boot .
 
       # The server must boot on this image as uid 1000 and list its actions.
-      # bin/generate_key.ts in the image makes the API key for the request.
       - name: Boot the server and list the actions
         run: |
           set -euo pipefail
           docker run -d --name hub -p 127.0.0.1:8080:8080 -e ACTION_HUB_BASE_URL=http://localhost:8080 \
-            -e ACTION_HUB_LABEL=boot -e ACTION_HUB_SECRET=boot action-hub:boot
+            -e ACTION_HUB_LABEL=boot action-hub:boot
           up=false
           for _ in $(seq 1 90); do
             [ "$(docker inspect -f '{{.State.Running}}' hub)" = true ] || break
@@ -223,6 +222,5 @@ jobs:
             sleep 2
           done
           [ "$up" = true ] || { docker logs hub; exit 1; }
-          key=$(docker exec hub node ./node_modules/ts-node/dist/bin.js ./bin/generate_key.ts | grep -Ex '[0-9a-f]{64}/[0-9a-f]{128}')
-          curl -sf --max-time 30 -X POST -H "Authorization: Token token=\"$key\"" http://127.0.0.1:8080/ \
+          curl -sf --max-time 30 -X POST http://127.0.0.1:8080/ \
             | jq -e '.integrations | type == "array" and length > 0' || { docker logs hub; exit 1; }
