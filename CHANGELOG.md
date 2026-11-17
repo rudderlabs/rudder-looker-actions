@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/rudderlabs/rudder-looker-actions/compare/1.6.1...1.6.2) (2026-11-17)
+
+
+### Miscellaneous
+
+* **deps:** bump the actions group across 3 directories with 9 updates ([#78](https://github.com/rudderlabs/rudder-looker-actions/issues/78)) ([a7a7fc5](https://github.com/rudderlabs/rudder-looker-actions/commit/a7a7fc5646c6748e985cc03afc09827430ed7ada))
+
 ## [1.6.1](https://github.com/rudderlabs/rudder-looker-actions/compare/1.6.0...1.6.1) (2026-11-03)
 
 
