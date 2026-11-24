@@ -20,6 +20,10 @@ COPY src ./src
 RUN yarn build
 
 FROM base AS runtime
+# The app needs no package manager at runtime: drop the npm, corepack and yarn CLIs that ship with the base.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v1.22.22
 COPY --from=deps /code/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY public ./public
